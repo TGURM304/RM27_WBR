@@ -24,25 +24,28 @@
 #define GYRO_CS_HIGH()                                                      \
     HAL_GPIO_WritePin(GYRO_CS_GPIO_Port, GYRO_CS_Pin, GPIO_PIN_SET)
 
+
+const float g = 9.80665f;
+
 /**
- * @brief 将原始值转为以 g 值表示的加速度
+ * @brief 将原始值转为以 m/s^2 为单位的加速度
  * @{
  */
-#define BMI088_ACCEL_3G_SEN  (3.f / 32768)
-#define BMI088_ACCEL_6G_SEN  (6.f / 32768)
-#define BMI088_ACCEL_12G_SEN (12.f / 32768)
-#define BMI088_ACCEL_24G_SEN (24.f / 32768)
+#define BMI088_ACCEL_3G_SEN  (g * 3.f / 32768)
+#define BMI088_ACCEL_6G_SEN  (g * 6.f / 32768)
+#define BMI088_ACCEL_12G_SEN (g * 12.f / 32768)
+#define BMI088_ACCEL_24G_SEN (g * 24.f / 32768)
 /** @} */
 
 /**
- * @brief 将原始值转为 deg/s 为单位的角速度
+ * @brief 将原始值转为以 rad/s 为单位的角速度
  * @{
  */
-#define BMI088_GYRO_2000_SEN (2000.f / 32768)
-#define BMI088_GYRO_1000_SEN (1000.f / 32768)
-#define BMI088_GYRO_500_SEN  (500.f / 32768)
-#define BMI088_GYRO_250_SEN  (250.f / 32768)
-#define BMI088_GYRO_125_SEN  (125.f / 32768)
+#define BMI088_GYRO_2000_SEN ((float) M_PI / 180.f * 2000.f / 32768)
+#define BMI088_GYRO_1000_SEN ((float) M_PI / 180.f * 1000.f / 32768)
+#define BMI088_GYRO_500_SEN  ((float) M_PI / 180.f * 500.f / 32768)
+#define BMI088_GYRO_250_SEN  ((float) M_PI / 180.f * 250.f / 32768)
+#define BMI088_GYRO_125_SEN  ((float) M_PI / 180.f * 125.f / 32768)
 /** @} */
 
 #define BMI088_TEMP_FACTOR 0.125f
@@ -126,13 +129,11 @@ bsp_imu_data_t bsp_imu_read() {
     accel_read(BMI088_ACCEL_XOUT_L, dat.buf, 6);
     for (uint8_t i = 0; i < 3; i++) {
         ret.accel[i] = (float) dat.raw[i] * BMI088_ACCEL_3G_SEN;
-        // ret.accel[i] *= -1;
     }
 
     gyro_read(BMI088_GYRO_X_L, dat.buf, 6);
     for (uint8_t i = 0; i < 3; i++) {
         ret.gyro[i] = (float) dat.raw[i] * BMI088_GYRO_2000_SEN;
-        ret.gyro[i] *= M_PI / 180.f;
     }
 
     accel_read(BMI088_TEMP_M, dat.buf, 2);
