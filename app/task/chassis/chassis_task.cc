@@ -5,6 +5,7 @@
 #include "chassis_task.h"
 #include "chassis_data_conifg.h"
 #include "observer/base_data_observer.h"
+#include "observer/leg_data_observer.h"
 #include "bsp/uart.h"
 #include "utils/os.h"
 
@@ -25,32 +26,29 @@ motor::dm::param_t joint_param(uint8_t id) {
         motor.init();
         motor.enable();
     }
-    right.enable();
-    left.enable();
     right.init();
     left.init();
-    right.update(0);
-    left.update(0);
-    Observer::base_data_observer observer({
+    right.enable();
+    left.enable();
+    Observer::base_data_observer base({
         .left = &left, .right = &right,
         .left_forward = &joint[3], .left_back = &joint[2],
         .right_forward = &joint[0], .right_back = &joint[1], .ins_data_ptr = ins::data()
     });
-    volatile bool reset_odometry = false; // 调试器置 true，下一轮重置左右轮里程
+    Observer::leg_observer legs(20.0f);
     TickType_t wake_time = xTaskGetTickCount();
-    static_assert(configTICK_RATE_HZ % WHEEL_CHASSIS_HZ == 0 && WHEEL_CHASSIS_HZ >= 10);
     for(;;) {
-        for(auto &motor : joint) motor.control(0, 0, 0, 0, 0); // 零目标力矩 MIT 帧，请求反馈
-        if(reset_odometry) {
-            observer.reset_wheel_odometry();
-            reset_odometry = false;
-        }
-        observer.chassis_tick();
+        for(auto &motor : joint) motor.control(0, 0, 0, 0, 0);
         right.update(0);
         left.update(0);
-        auto temp = observer.get_chassis_data();
-        bsp_uart_printf(E_UART_1,"%f,%f,%f,%f,%f,%f\r\n",temp.j1.pos_/3.1415*180,temp.j2.pos_/3.1415*180
-            ,temp.j3.pos_/3.1415*180,temp.j4.pos_/3.1415*180,temp.motor_left.total_angle,temp.motor_right.total_angle);
+
+        base.chassis_tick();
+            const auto data = base.get_chassis_data();
+            // leg_tick 输入顺序：左小、左大、右小、右大，单位 rad。
+            legs.leg_tick(data.j4.pos_, data.j3.pos_, data.j1.pos_, data.j2.pos_);
+            const auto [left_leg, right_leg] = legs.get_leg_data();
+            bsp_uart_printf_async(E_UART_1, "%f,%f,%f,%f,%f,%f\r\n",
+                                  left_leg.leg_len, right_leg.leg_len, left_leg.leg_len_dot, right_leg.leg_len_dot, 0.0, 0.0);
         vTaskDelayUntil(&wake_time, configTICK_RATE_HZ / WHEEL_CHASSIS_HZ);
     }
 }

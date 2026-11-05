@@ -56,8 +56,10 @@ extern "C" [[noreturn]] void app_entrance(void *args) {
     // Init Application Tasks
     BSP_ASSERT(os::task::static_create(
         example_task, nullptr, "example_task", 512, os::task::Priority::HIGH
-    ));
-    os::task::static_create(chassis_task, nullptr, "chassis_task", 1024, os::task::Priority::HIGH);
+        ));
+    BSP_ASSERT(os::task::static_create(
+            chassis_task, nullptr, "chassis_task", 1024, os::task::Priority::HIGH
+        ));
 
     for (;;) {
         if (hw_failed == 0) {
