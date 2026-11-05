@@ -31,7 +31,7 @@ Observer::joints joint_map(const motor::dm::feedback_t &feedback,
     result.master_id = param.master_id;
     result.slave_id = param.slave_id;
     if(feedback.timestamp == 0) return result;
-    result.pos_ = joint_angle(dir * (feedback.pos - offset));
+    result.pos_ = joint_angle(dir * feedback.pos+ offset);
     result.vel_ = dir * feedback.vel;
     result.tor = dir * feedback.torque;
     result.state = feedback.err;

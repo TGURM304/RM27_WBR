@@ -49,7 +49,8 @@ motor::dm::param_t joint_param(uint8_t id) {
         right.update(0);
         left.update(0);
         auto temp = observer.get_chassis_data();
-        bsp_uart_printf(E_UART_1,"%f,%f,%f,%f,%f,%f\r\n",temp.j1.pos_,temp.j2.pos_,temp.j3.pos_,temp.j4.pos_,temp.motor_left.total_angle,temp.motor_right.total_angle);
+        bsp_uart_printf(E_UART_1,"%f,%f,%f,%f,%f,%f\r\n",temp.j1.pos_/3.1415*180,temp.j2.pos_/3.1415*180
+            ,temp.j3.pos_/3.1415*180,temp.j4.pos_/3.1415*180,temp.motor_left.total_angle,temp.motor_right.total_angle);
         vTaskDelayUntil(&wake_time, configTICK_RATE_HZ / WHEEL_CHASSIS_HZ);
     }
 }
