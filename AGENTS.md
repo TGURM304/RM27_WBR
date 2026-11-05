@@ -1,9 +1,46 @@
-# TRobot Agent Guide
+# Repository Guidelines
 
-This file records project-specific maintenance rules for AI coding agents.
-Read it before editing code in this repository.
+## Project Structure & Module Organization
 
-## Project Context
+TRobot is an STM32H723 firmware framework built with CMake, FreeRTOS, STM32 HAL, and C++ components. CubeMX-generated code stays in `Core/`, `Drivers/`, `Middlewares/`, `USB_DEVICE/`, and `cmake/stm32cubemx/`. The generated FreeRTOS `entrance` thread calls C++ `app_entrance()` in `app/main/main.cc`; keep application task orchestration and robot behavior under `app/`.
+
+Hardware ownership belongs in `bsp/`: public C headers are in `bsp/include/bsp/`, implementations in `bsp/src/`, private helpers in `bsp/internal/`, and bundled ports such as SEGGER, EasyFlash, USB, and W25Q64 remain in their existing folders. Reusable modules live in `components/<name>/` with `include/<name>/`, `src/`, optional `internal/`, and a `CMakeLists.txt` exporting `components::<name>`.
+
+## Build, Test, and Development Commands
+
+- `git clone --recursive <repo>`: clone required component submodules.
+- `cmake --preset Debug`: configure the Ninja Debug build with `cmake/gcc-arm-none-eabi.cmake`.
+- `cmake --build --preset Debug`: build firmware; `app` uses `-Werror`.
+- `cmake --build --preset Release`: build the optimized preset.
+- `cmake --build --preset Debug --target flash_and_verify`: flash and verify through OpenOCD using `stlink.cfg`.
+
+### OpenOCD GDB Debugging
+
+- Before starting OpenOCD, confirm whether the connected debug probe is DAPLink/CMSIS-DAP or ST-Link; do not infer the probe type from prior sessions or the default flash target.
+- Start the GDB server from the repository root with `openocd -f daplink.cfg` for DAPLink/CMSIS-DAP, or `openocd -f stlink.cfg` for ST-Link.
+- In another terminal, run `arm-none-eabi-gdb build/Debug/trobot.elf`, then connect with `target extended-remote localhost:3333`.
+- Use `monitor reset halt` to reproduce initialization paths, set breakpoints, and run `continue`. When leaving a halted session, run `monitor resume` followed by `detach` so the target keeps running.
+- Ensure the ELF matches the firmware on the target. Starting a debug session does not authorize `load`, `monitor program`, or any flash operation; those require an explicit user request.
+
+Use CLion CMake preset profiles. After CubeMX regeneration, check whether `STM32H723XG_FLASH.ld` was overwritten.
+
+## Codex Execution Policy
+
+Before build verification, every agent MUST determine whether it is running as Codex. A Codex agent MUST then inspect the active permission profile. If the session has Full Access (`danger-full-access` or an equivalent unrestricted profile), it MUST run the relevant CMake build and report the result. If the session is sandboxed, restricted, or the permission level cannot be confirmed, it MUST NOT run firmware builds, `make`, or CMake/Ninja build commands, and MUST tell the user that build verification was skipped because Full Access is unavailable. Build permission does not authorize OpenOCD, flash, or hardware verify targets; those still require an explicit user request.
+
+## Coding Style & Naming Conventions
+
+Use C17 for BSP/generated C and C++23 for application/components. Keep four-space indentation, concise functions, and descriptive `snake_case` names. BSP APIs use `bsp_*` and C enums such as `E_CAN_1` or `E_UART_1`; keep HAL, FreeRTOS, SEGGER, CubeMX, and third-party names unchanged. Components use namespaces such as `os`, `motor`, `rc::dr16`, `ins`, and `robot::chassis`, with small classes or structs for typed configuration.
+
+Prefer typed constants, `static constexpr`, local `static` helpers, and `BSP_ASSERT` for invariants. Keep comments minimal — only for hardware timing, units, protocol layouts, calibration, concurrency, or DMA/cache constraints. Do not add section-header banners, ASCII art, "Created by" blocks, or explanatory comments for self-documenting code. When in doubt, omit the comment.
+
+## RTOS & Embedded Design Guidelines
+
+Initialize board hardware through `bsp_hw_init()` before starting application tasks. Create tasks from `app_entrance()` using `os::task::static_create()` or FreeRTOS APIs, and keep watchdog refresh paths explicit. Use `os::task::sleep()` or `vTaskDelayUntil()` for periodic work; reserve busy microsecond waits for short hardware timing.
+
+Keep ISRs and HAL callbacks short. Defer work through callbacks, queues, notifications, or component state updates. Protect shared ISR/task state with `bsp/sys.h` critical-section helpers. DMA-visible buffers must be placed in a DMA-accessible RAM domain; review lifetime and cache behavior before changing UART, CAN, SPI, USB, IMU, or flash paths.
+
+## CubeMX, Testing, and PRs
 
 - Read [PROJECT.md](app/task/chassis/PROJECT.md) before chassis development. It records confirmed model-data requirements and unresolved implementation details; do not turn unresolved items into assumed configuration.
 - Chassis work follows the author's preference for focused responsibilities, explicit dependencies and necessary state only. Keep units, directions and call contracts clear; avoid redundant conversion and speculative frameworks.
@@ -13,68 +50,45 @@ Read it before editing code in this repository.
 - MCU resources are relatively abundant. Do not optimize aggressively for code size unless a concrete limit is involved.
 - Favor concise, readable, maintainable code over dense micro-optimizations.
 
-## Coding Style
+**CubeMX modification boundary**: Changes that require adjusting CubeMX-generated content — including `FreeRTOSConfig.h`, interrupt priorities in NVIC, peripheral pin assignments, clock tree, DMA streams, linker script memory regions, or any `.ioc`-managed setting — MUST NOT be made directly by the agent. Instead, describe the required CubeMX change and ask the user to apply it manually through the CubeMX IDE. Direct edits to `trobot.ioc`, generated `Core/` files outside `USER CODE` sections, `Drivers/`, `Middlewares/`, `USB_DEVICE/`, or `startup_stm32h723xx.s` are PROHIBITED.
 
-- Use `snake_case` for identifiers whenever possible.
-- Exceptions:
-  - Preprocessor macros may keep `UPPER_SNAKE_CASE`.
-  - Enum constants may keep the existing enum style.
-  - Third-party, STM32 HAL, CubeMX, FreeRTOS, SEGGER, or component API names should not be renamed just for style.
-- Keep names descriptive but not verbose.
-- Prefer small, direct functions with clear ownership over clever abstractions.
-- Add comments only when they explain non-obvious hardware behavior, timing constraints, concurrency contracts, or protocol details.
+No standalone automated test harness is present. For firmware changes, run a clean CMake build and document board verification: flash result, OpenOCD verify status, terminal output, sensor data, CAN/UART traffic, or motor response.
 
-## RTOS Guidelines
+History uses `feat:`, `fix:`, `chore:`, and `doc:` prefixes, sometimes with scopes like `feat (ins):`. PRs should include a summary, affected modules, build results, hardware verification status, and linked issues when applicable.
 
-- Use RTOS primitives deliberately instead of ad hoc polling when coordination is needed.
-- Prefer blocking waits with timeouts over busy loops.
-- Keep ISR code short. Defer work to tasks using queues, notifications, semaphores, or other RTOS-safe mechanisms.
-- Make task responsibilities explicit. Avoid sharing mutable state across tasks unless ownership and synchronization are clear.
-- When adding a task, document its purpose, wake-up source, and priority rationale near the task setup if the relationship is not obvious.
+## Agent Conventions
 
-## Embedded Design Preferences
+### Modification Discipline
 
-- Clarity is more important than minimizing every byte.
-- Avoid hidden global coupling. If a module owns hardware state, expose a narrow API around that ownership.
-- Treat hardware timing, DMA buffers, interrupt callbacks, and cache coherency as high-risk areas. Review these changes carefully.
-- Prefer typed configuration and local constants over scattered magic numbers.
-- Preserve generated-code boundaries. Keep user logic in application, BSP, or component areas rather than editing CubeMX generated sections unnecessarily.
+Do not rewrite or restructure code speculatively. Every change must follow the existing intent, naming, formatting, and architectural patterns of the file it touches. Before making a change that alters more than a few localized lines — or that changes interfaces, deletes user-authored comments, renames symbols, or introduces new abstractions — ask the user whether the change is desired. When in doubt, ask.
 
-## Repository Layout
+### Submodule Synchronization
 
-- `app/`: application entry points and RTOS task code.
-- `bsp/`: board support package and hardware-facing drivers.
-- `components/`: reusable components and optional submodules.
-- `Core/`, `Drivers/`, `Middlewares/`, `USB_DEVICE/`, `cmake/stm32cubemx/`: STM32CubeMX, HAL, middleware, and generated integration areas.
-- `assets/`: documentation images and other non-firmware assets.
+- **URL protocol**: Submodule URLs in `.gitmodules` MUST use HTTPS, never SSH.
+- **Local iteration**: commit only the submodule (`components/<name>`); do NOT sync the trobot superproject. Avoids noise commits like `chore(<name>): update submodule`.
+- **Remote push**: after pushing the submodule, MUST update the submodule pointer in trobot (`git add components/<name>`, commit, push). The remote depends on the pointer to resolve the submodule version.
 
-## Build And Verification
+### Default Configuration in main.cc
 
-- The project is built through CMake presets, commonly from CLion.
-- `app` is compiled with `-Werror`; keep warnings clean.
-- When changing firmware code, prefer at least a local build check when toolchains are available.
-- For hardware-dependent behavior, state what was verified locally and what still needs board testing.
-- Flashing is available through the `flash_and_verify` CMake target with OpenOCD configuration in `stlink.cfg`.
+`logger::init` and `terminal::init` in `app/main/main.cc` are **commented out by default**. Uncomment them during debugging, but keep them commented when committing. Prevents debug output from occupying the serial port in production firmware.
 
-## CubeMX Notes
+### Commit Attribution
 
-- The `.ioc` file is the source for STM32CubeMX regeneration.
-- FreeRTOS and MCU peripheral/clock/NVIC/DMA configuration changes should be made through the `.ioc` file when they are configuration-level changes.
-- Edit the `.ioc` file directly only when the intended CubeMX setting and its generated-code effect are fully understood. If there is any uncertainty, stop and ask the user to make or confirm the CubeMX change.
-- CubeMX may overwrite generated files. Keep custom logic out of generated regions unless the file explicitly supports user sections.
-- After CubeMX regeneration, check linker script changes carefully. The project README notes that the `.ld` file may need to be restored.
+Commit messages MUST be written in Chinese. Use the format `<type>(<scope>): <中文简述>`, e.g. `fix(bsp): 修复 CAN 发送临界区过长问题`. The agent marker `[agent: <model>]` goes on a separate line after the body, e.g.:
 
-## Git And Submodules
+```
+fix(bsp): 替换运行时 BSP_ASSERT 为错误返回
 
-- `components/` may contain Git submodules. Do not reset, clean, or rewrite submodule state unless explicitly requested.
-- If the worktree already has unrelated changes, leave them intact and scope edits to the requested task.
-- When adding optional components, use documented submodule commands from `readme.md` unless the user requests another source.
+[agent: deepseek/deepseek-v4-pro]
+```
 
-## Agent Operating Rules
+### Modification Review
 
-- Before editing, inspect the nearby code and follow existing local patterns.
-- Keep changes narrowly scoped to the request.
-- Do not rename public APIs or move module boundaries unless that is part of the requested change.
-- Prefer `rg` for searching.
-- Do not guess when project behavior, hardware configuration, CubeMX settings, or user intent is uncertain. Stop and ask the user immediately.
-- Maintain this file when project conventions change, especially style, RTOS usage, build, or verification rules.
+After every modification, the agent MUST review the changes for correctness before yielding. The review scope includes but is not limited to:
+- Code logic and invariants
+- API contract consistency (callers updated, signatures match)
+- Concurrency correctness (ISR/task shared state)
+- Memory safety (buffer sizes, DMA alignment, RAM domain placement)
+- Runtime `BSP_ASSERT` misuse (assert only for init-time errors, never runtime)
+
+Non-Codex agents MUST additionally run a compilation test (`cmake --build --preset Debug`) and verify zero errors before considering the modification complete. Codex agents MUST follow the permission-dependent build policy above: build under Full Access, otherwise perform static review and explicitly report that compilation was skipped.
