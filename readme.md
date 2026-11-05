@@ -1,3 +1,12 @@
+# RM27_WBR
+
+二自由度腿部轮腿机器人项目。当前正在建立电机与 IMU 反馈到模型零点、方向和物理单位之间的映射。
+
+- [项目背景、数据约定与开发约束](app/task/chassis/PROJECT.md)
+- [底盘电机 ID 布局](app/task/chassis/chassis.md)
+
+以下保留 TRobot 框架的配置与构建说明。
+
 ## TRobot
 
 **T**GU **R**obot: The next robot embedded development framework.

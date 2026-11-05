@@ -5,6 +5,9 @@ Read it before editing code in this repository.
 
 ## Project Context
 
+- Read [PROJECT.md](app/task/chassis/PROJECT.md) before chassis development. It records confirmed model-data requirements and unresolved implementation details; do not turn unresolved items into assumed configuration.
+- Chassis work follows the author's preference for focused responsibilities, explicit dependencies and necessary state only. Keep units, directions and call contracts clear; avoid redundant conversion and speculative frameworks.
+
 - This is an STM32H723 embedded robot framework built with CMake.
 - The project uses FreeRTOS. Prefer clear task, queue, semaphore, timer, and event-group based designs when they simplify concurrency.
 - MCU resources are relatively abundant. Do not optimize aggressively for code size unless a concrete limit is involved.
