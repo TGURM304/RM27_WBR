@@ -20,6 +20,11 @@ void leg_observer::leg_tick(float left_small, float left_big,
         leg_data_right = {0};
         leg_clear_flag = false;
     }
+    old_left_len = leg_data_left.leg_len;
+    old_right_len = leg_data_right.leg_len;
+    old_left_phi = leg_data_left.leg_phi;
+    old_right_phi = leg_data_right.leg_phi;
+
     leg_data_left.joint_small = left_small;
     leg_data_left.joint_big = left_big;
     leg_data_right.joint_small = left_small;
@@ -45,5 +50,5 @@ void leg_observer::leg_pos_clc(leg_data& data)
 
 void leg_observer::leg_after_clc(leg_data& data)
 {
-    
+
 }

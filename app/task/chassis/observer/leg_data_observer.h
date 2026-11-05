@@ -32,9 +32,9 @@ namespace Observer
         }
     private:
         bool leg_clear_flag = false;
-        float old_left_phi, old_right_phi;
+        float old_left_phi = 0, old_right_phi = 0;
         float old_left_len, old_right_len;
-        leg_data leg_data_left, leg_data_right;
+        leg_data leg_data_left = {0}, leg_data_right = {0};
         void leg_pos_clc(leg_data &data);
         void leg_after_clc(leg_data &data);
     };
