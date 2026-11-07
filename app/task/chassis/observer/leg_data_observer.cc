@@ -46,12 +46,13 @@ void leg_observer::leg_tick(float left_small, float left_big,
 
 void leg_observer::leg_pos_clc(leg_data& data)
 {
-    float beta = asinf(sinf((data.joint_big-data.joint_small)/2.0f)*LEG_LEN_AD/LEG_LEN_CD);
-    float alpha = PI_F32 - beta - (data.joint_big-data.joint_small)/2;
-    data.leg_pos_x = cosf(data.joint_big)*LEG_LEN_AG +
-        cosf(data.joint_big - PI_F32 + alpha)*LEG_LEN_GW;
-    data.leg_pos_y = sinf(data.joint_big)*LEG_LEN_AG +
-        sinf(data.joint_big - PI_F32 + alpha)*LEG_LEN_GW;
+    const float delta = data.joint_big - data.joint_small;
+    // 先取有向最短角再求半角，避免关节跨 +/-pi 时切换几何分支。
+    const float half_angle = 0.5f * atan2f(sinf(delta), cosf(delta));
+    const float beta = asinf(sinf(half_angle)*LEG_LEN_AD/LEG_LEN_CD);
+    const float cd_angle = data.joint_big - half_angle - beta;
+    data.leg_pos_x = cosf(data.joint_big)*LEG_LEN_AG + cosf(cd_angle)*LEG_LEN_GW;
+    data.leg_pos_y = sinf(data.joint_big)*LEG_LEN_AG + sinf(cd_angle)*LEG_LEN_GW;
     data.leg_phi = atan2f(data.leg_pos_y, data.leg_pos_x);
     data.leg_len = sqrtf(data.leg_pos_x*data.leg_pos_x + data.leg_pos_y*data.leg_pos_y);
 }
@@ -67,6 +68,8 @@ void leg_observer::leg_after_clc()
         float delta_len = i->leg_len - i->old_len;
         if (i == &leg_data_left)
         {
+            left_raw = delta_len/delta_time;
+            left_phi_raw = delta_phi/delta_time;
             i->leg_len_dot = left_len_filter.update(delta_len/delta_time);
             i->leg_phi_dot = left_phi_filter.update(delta_phi/delta_time);
         }

@@ -42,8 +42,9 @@ namespace Observer
             result.second = leg_data_right;
             return result;
         }
+        float left_raw, left_phi_raw;
     private:
-        bool leg_clear_flag = true;
+        bool leg_clear_flag = true; 
         leg_data leg_data_left = {0}, leg_data_right = {0};
         filter::low_pass_filter left_len_filter, right_len_filter;
         filter::low_pass_filter left_phi_filter, right_phi_filter;
