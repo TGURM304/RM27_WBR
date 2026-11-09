@@ -46,9 +46,11 @@ void leg_observer::leg_tick(float left_small, float left_big,
 
 void leg_observer::leg_pos_clc(leg_data& data)
 {
-    const float delta = data.joint_big - data.joint_small;
-    // 先取有向最短角再求半角，避免关节跨 +/-pi 时切换几何分支。
-    const float half_angle = 0.5f * atan2f(sinf(delta), cosf(delta));
+    constexpr float two_pi = 2.0f * std::numbers::pi_v<float>;
+    // 大腿摆杆顺时针转到小腿摆杆的角度，范围 [0, 2pi)。
+    float delta = fmodf(data.joint_big - data.joint_small, two_pi);
+    if (delta < 0.0f) delta += two_pi;
+    const float half_angle = 0.5f * delta;
     const float beta = asinf(sinf(half_angle)*LEG_LEN_AD/LEG_LEN_CD);
     const float cd_angle = data.joint_big - half_angle - beta;
     data.leg_pos_x = cosf(data.joint_big)*LEG_LEN_AG + cosf(cd_angle)*LEG_LEN_GW;

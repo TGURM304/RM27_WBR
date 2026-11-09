@@ -35,7 +35,7 @@ extern "C" [[noreturn]] void app_entrance(void *args) {
     music::init();
     // logger::init(E_UART_1, logger::INFO);
     // terminal::init(E_UART_1);
-    // rc::dr16::init(E_UART_5);
+    rc::dr16::init(E_UART_5);
     // rc::ht10::init(E_UART_5);
 
     if ((hw_failed & BSP_HW_IMU) != 0) {

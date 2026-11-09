@@ -41,10 +41,10 @@ motor::dm::param_t joint_param(uint8_t id) {
     });
     Observer::leg_observer legs(20.0f);
     Controller::LegController leg_ctrl(
-    {10, 0, 0, 0, 0.8},
+    {5, 0, 0, 0, 0.8},
  {150, 10, 0, 20, 50},
-    {1, 0, 0, 1, 1},
- {1, 0, 0, 1, 1});
+    {20, 0, 0, 0, 2},
+ {8, 1, 0, 3, 10});
     TickType_t wake_time = xTaskGetTickCount();
 
     auto rc = rc::dr16::data();
@@ -62,13 +62,14 @@ motor::dm::param_t joint_param(uint8_t id) {
             joint[1].control(0,0,0,0,0);
             joint[2].control(0,0,0,0,0);
             joint[3].control(0,0,0,0,0);
+            leg_ctrl.leg_clear();
         }
         else if (enable_flag == true)
         {
             joint[0].control(0,0,0,0,0);
             joint[1].control(0,0,0,0,0);
-            joint[2].control(0,0,0,0,0);
-            joint[3].control(0,0,0,0,0);
+            joint[2].control(0,0,0,0,out.pos_ctrl_big);
+            joint[3].control(0,0,0,0,out.pos_ctrl_small);
         }
         right.update(0);
         left.update(0);
@@ -79,20 +80,21 @@ motor::dm::param_t joint_param(uint8_t id) {
         legs.leg_tick(data.j4.pos_, data.j3.pos_, data.j1.pos_, data.j2.pos_);
         const auto leg = legs.get_leg_data().first;
         Controller::leg_ctrl_data cmd{};
-        cmd.rad_error = (PI/2 - leg.leg_phi);
-        if (cmd.rad_error > PI) cmd.rad_error = 
-        cmd.target_len = 0.0f;
-        cmd.current_rad = leg.leg_phi; cmd.current_omega = leg.leg_phi_dot;
+        cmd.rad_error = PI/2-leg.leg_phi;
+        if (cmd.rad_error < -PI) cmd.rad_error += 2*PI;
+        else if (cmd.rad_error > PI) cmd.rad_error -= 2*PI;
+        cmd.target_len = 0.18;
         cmd.current_len = leg.leg_len; cmd.current_speed = leg.leg_len_dot;
+        cmd.current_rad = leg.leg_phi; cmd.current_omega = leg.leg_phi_dot;
         cmd.small_rad = leg.joint_small; cmd.big_rad = leg.joint_big;
         cmd.forward_x = 0.0f; cmd.forward_tor_M = 0.0f;
         cmd.forward_y = 0.0f; cmd.forward_force_L = 0.0f;
         if (enable_flag) leg_ctrl.leg_enable(); else leg_ctrl.leg_disable();
         leg_ctrl.leg_ctrl_clc(cmd);
         out = leg_ctrl.get_output();
-        bsp_uart_printf(E_UART_1,"%f,%f,%f,%f,%f,%f\r\n",
-            out.forward_cod_small, out.forward_cod_big, out.forward_poly_small, out.forward_poly_big,
-            out.pos_ctrl_small, out.pos_ctrl_big);
+        bsp_uart_printf(E_UART_1,"%f,%f,%f,%f,%f,%f,%f\r\n",
+            cmd.current_len, cmd.current_rad, leg.leg_phi_dot, out.forward_poly_big,
+            leg.joint_small, leg.joint_big,(leg.joint_big-leg.joint_small)/PI*180.0f);
         vTaskDelayUntil(&wake_time, configTICK_RATE_HZ / WHEEL_CHASSIS_HZ);
     }
 }

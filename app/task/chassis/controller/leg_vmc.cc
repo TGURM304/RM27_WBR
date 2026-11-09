@@ -5,6 +5,7 @@
 #include "leg_vmc.h"
 #include "chassis_data_conifg.h"
 #include <cmath>
+#include <numbers>
 
 namespace {
 struct vmc_coefficients {
@@ -14,9 +15,10 @@ struct vmc_coefficients {
 vmc_coefficients vmc_coeff_clc(float theta1, float theta2) {
     constexpr float a = LEG_LEN_AG, b = LEG_LEN_GW;
     constexpr float k = LEG_LEN_AD / LEG_LEN_CD;
-    const float relative = theta2 - theta1;
-    // 取 [0, pi] 内的劣弧；工作夹角保证在 20° 到 180° 之间。
-    const float delta = fabsf(atan2f(sinf(relative), cosf(relative)));
+    constexpr float two_pi = 2.0f * std::numbers::pi_v<float>;
+    // theta2 大腿顺时针转到 theta1 小腿，范围 [0, 2pi)。
+    float delta = fmodf(theta2 - theta1, two_pi);
+    if (delta < 0.0f) delta += two_pi;
     const float half_angle = 0.5f * delta;
     const float sin_half = sinf(half_angle), cos_half = cosf(half_angle);
     const float sin_beta = k * sin_half;
