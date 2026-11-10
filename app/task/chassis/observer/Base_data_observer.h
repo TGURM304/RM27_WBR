@@ -41,11 +41,11 @@ struct chassis_basedata {
 // 设备在对象存活期间有效；INS 已采用 X 前、Y 左、Z 上的机体坐标。
 // 同一底盘任务按 WHEEL_CHASSIS_HZ 调用 tick、读取和重置，INS 任务优先级更高。
 // timestamp=0 表示未收到反馈；相邻轮采样间转子转动必须严格小于半圈。
-class base_data_observer {
+class Base_data_observer {
 public:
-    explicit base_data_observer(comp_ptr comp):comp_(comp) {}
+    explicit Base_data_observer(comp_ptr comp):comp_(comp) {}
     void chassis_tick();
-    chassis_basedata get_chassis_data() const { return data_; }
+    chassis_basedata get_chassis_data() { return data_; }
     void reset_wheel_odometry() { reset_ = true; } // 下一次 tick 同时重置左右轮
 
 private:

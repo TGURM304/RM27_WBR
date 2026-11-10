@@ -37,9 +37,12 @@ void LegController::leg_pos_ctrl()
     const float force_L = speed_pid.update(leg_ctrl_.current_speed, target_speed, dt);
     const float target_omega = rad_pid.update(0.0f, leg_ctrl_.rad_error, dt);
     const float tor_M = omega_pid.update(leg_ctrl_.current_omega, target_omega, dt);
-    const auto tor = vmc_pol_clc(leg_ctrl_.small_rad, leg_ctrl_.big_rad, tor_M, force_L);
-    output_.pos_ctrl_small = tor.first;
-    output_.pos_ctrl_big = tor.second;
+    const auto len_tor = vmc_pol_clc(leg_ctrl_.small_rad, leg_ctrl_.big_rad, 0.0f, force_L);
+    const auto rad_tor = vmc_pol_clc(leg_ctrl_.small_rad, leg_ctrl_.big_rad, tor_M, 0.0f);
+    output_.len_ctrl_small = len_tor.first;
+    output_.len_ctrl_big = len_tor.second;
+    output_.rad_ctrl_small = rad_tor.first;
+    output_.rad_ctrl_big = rad_tor.second;
 }
 
 void LegController::leg_clear()

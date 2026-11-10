@@ -31,8 +31,10 @@ namespace Controller
         float forward_cod_small, forward_cod_big;
         //前馈的极坐标系扭矩计算
         float forward_poly_small, forward_poly_big;
-        //腿长控制的极坐标系计算
-        float pos_ctrl_small, pos_ctrl_big;
+        //腿长闭环扭矩
+        float len_ctrl_small, len_ctrl_big;
+        //腿摆角闭环扭矩
+        float rad_ctrl_small, rad_ctrl_big;
     }out_put_tor;
     class LegController {
         public:

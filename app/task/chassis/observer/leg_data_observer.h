@@ -19,11 +19,11 @@ namespace Observer
         float leg_phi_dot, leg_len_dot;
         float old_phi, old_len;
     }leg_data;
-    class leg_observer
+    class Leg_observer
     {
     public:
-        leg_observer():leg_observer(20.0f) {}
-        leg_observer(float cut_frequency_):
+        Leg_observer():Leg_observer(20.0f) {}
+        Leg_observer(float cut_frequency_):
         left_len_filter(cut_frequency_,WHEEL_CHASSIS_HZ),
             right_len_filter(cut_frequency_,WHEEL_CHASSIS_HZ),
             left_phi_filter(cut_frequency_,WHEEL_CHASSIS_HZ),

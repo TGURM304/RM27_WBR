@@ -4,14 +4,9 @@
 
 #include "chassis_task.h"
 #include "chassis_data_conifg.h"
-#include "observer/base_data_observer.h"
-#include "observer/leg_data_observer.h"
+#include "chassis_coor.h"
 #include "bsp/uart.h"
 #include "utils/os.h"
-#include "leg_vmc.h"
-#include "rc/dr16.h"
-#include "controller/leg_controller.h"
-#include <cmath>
 
 namespace {
 motor::dm::param_t joint_param(uint8_t id) {
@@ -34,67 +29,32 @@ motor::dm::param_t joint_param(uint8_t id) {
     left.init();
     right.enable();
     left.enable();
-    Observer::base_data_observer base({
+    Observer::comp_ptr motors{
         .left = &left, .right = &right,
         .left_forward = &joint[3], .left_back = &joint[2],
         .right_forward = &joint[0], .right_back = &joint[1], .ins_data_ptr = ins::data()
-    });
-    Observer::leg_observer legs(20.0f);
-    Controller::LegController leg_ctrl(
-    {5, 0, 0, 0, 0.8},
- {150, 10, 0, 20, 50},
-    {20, 0, 0, 0, 2},
- {8, 1, 0, 3, 10});
+    };
+    Observer::Base_data_observer base(motors);
+    Observer::Leg_observer legs(20.0f);
+    const controller::pid::pid_para_t len{5, 0, 0, 0, 0.8f}, speed{150, 10, 0, 20, 50};
+    const controller::pid::pid_para_t rad{20, 0, 0, 0, 2}, omega{8, 1, 0, 3, 10};
+    Controller::LegController leg_ctrl[] = {{len, speed, rad, omega}, {len, speed, rad, omega}};
+    Coordinator::chassis_coor coor(nullptr, &leg_ctrl[0], &leg_ctrl[1], &base, &legs, &legs, motors);
     TickType_t wake_time = xTaskGetTickCount();
-
-    auto rc = rc::dr16::data();
-    bool enable_flag = false;
-    Controller::out_put_tor out;
-    Observer::chassis_basedata data = {};
     for(;;) {
-        if (rc->s_l == 1)
-            enable_flag = true;
-        else if (rc->s_l != 1)
-            enable_flag = false;
-        if (enable_flag == false)
-        {
-            joint[0].control(0,0,0,0,0);
-            joint[1].control(0,0,0,0,0);
-            joint[2].control(0,0,0,0,0);
-            joint[3].control(0,0,0,0,0);
-            leg_ctrl.leg_clear();
-        }
-        else if (enable_flag == true)
-        {
-            joint[0].control(0,0,0,0,0);
-            joint[1].control(0,0,0,0,0);
-            joint[2].control(0,0,0,0,out.pos_ctrl_big);
-            joint[3].control(0,0,0,0,out.pos_ctrl_small);
-        }
-        right.update(0);
-        left.update(0);
-
-        base.chassis_tick();
-        data = base.get_chassis_data();
-        // leg_tick 输入顺序：左小、左大、右小、右大，单位 rad。
-        legs.leg_tick(data.j4.pos_, data.j3.pos_, data.j1.pos_, data.j2.pos_);
-        const auto leg = legs.get_leg_data().first;
-        Controller::leg_ctrl_data cmd{};
-        cmd.rad_error = PI/2-leg.leg_phi;
-        if (cmd.rad_error < -PI) cmd.rad_error += 2*PI;
-        else if (cmd.rad_error > PI) cmd.rad_error -= 2*PI;
-        cmd.target_len = 0.18;
-        cmd.current_len = leg.leg_len; cmd.current_speed = leg.leg_len_dot;
-        cmd.current_rad = leg.leg_phi; cmd.current_omega = leg.leg_phi_dot;
-        cmd.small_rad = leg.joint_small; cmd.big_rad = leg.joint_big;
-        cmd.forward_x = 0.0f; cmd.forward_tor_M = 0.0f;
-        cmd.forward_y = 0.0f; cmd.forward_force_L = 0.0f;
-        if (enable_flag) leg_ctrl.leg_enable(); else leg_ctrl.leg_disable();
-        leg_ctrl.leg_ctrl_clc(cmd);
-        out = leg_ctrl.get_output();
-        bsp_uart_printf(E_UART_1,"%f,%f,%f,%f,%f,%f,%f\r\n",
-            cmd.current_len, cmd.current_rad, leg.leg_phi_dot, out.forward_poly_big,
-            leg.joint_small, leg.joint_big,(leg.joint_big-leg.joint_small)/PI*180.0f);
+        coor.chassis_observer();
+        coor.chassis_command();
+        coor.chassis_protection();
+        coor.chassis_scheduler();
+        coor.chassis_controller();
+        coor.chassis_actuator();
+        const auto measured = legs.get_leg_data();
+        const auto left_out = leg_ctrl[0].get_output(), right_out = leg_ctrl[1].get_output();
+        bsp_uart_printf(E_UART_1, "%f,%f,%f,%f,%f,%f,%f,%f\r\n",
+            measured.first.leg_len, measured.second.leg_len,
+            measured.first.leg_phi, measured.second.leg_phi,
+            left_out.len_ctrl_small + left_out.rad_ctrl_small, left_out.len_ctrl_big + left_out.rad_ctrl_big,
+            right_out.len_ctrl_small + right_out.rad_ctrl_small, right_out.len_ctrl_big + right_out.rad_ctrl_big);
         vTaskDelayUntil(&wake_time, configTICK_RATE_HZ / WHEEL_CHASSIS_HZ);
     }
 }

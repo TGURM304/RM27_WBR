@@ -2,7 +2,7 @@
 // Created by KLnormal on 2026/11/3.
 //
 
-#include "base_data_observer.h"
+#include "Base_data_observer.h"
 #include "chassis_data_conifg.h"
 #include "bsp/sys.h"
 #include <cmath>
@@ -39,8 +39,8 @@ Observer::joints joint_map(const motor::dm::feedback_t &feedback,
 }
 }
 
-void Observer::base_data_observer::chassis_tick() {
-    motor::dji::feedback_t left, right;
+void Observer::Base_data_observer::chassis_tick() {
+    motor::dji::feedback_t left{}, right{};
     motor::dm::feedback_t joint[4];
     ins::data_t body;
     // 临界区只复制输入；保持 INS 任务优先级高于调用任务且整轮发布的约定。
@@ -74,7 +74,7 @@ void Observer::base_data_observer::chassis_tick() {
     };
 }
 
-void Observer::base_data_observer::wheel_process(const motor::dji::feedback_t &feedback, float dir,
+void Observer::Base_data_observer::wheel_process(const motor::dji::feedback_t &feedback, float dir,
                                                wheel_history &history, motors &result) {
     if(feedback.timestamp == 0) return;
     if(history.sampled) {

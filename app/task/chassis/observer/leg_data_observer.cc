@@ -11,7 +11,7 @@
 
 using namespace  Observer;
 
-void leg_observer::leg_tick(float left_small, float left_big,
+void Leg_observer::leg_tick(float left_small, float left_big,
             float right_small, float right_big)
 {
     if (leg_clear_flag == true)
@@ -44,7 +44,7 @@ void leg_observer::leg_tick(float left_small, float left_big,
     leg_after_clc();
 }
 
-void leg_observer::leg_pos_clc(leg_data& data)
+void Leg_observer::leg_pos_clc(leg_data& data)
 {
     constexpr float two_pi = 2.0f * std::numbers::pi_v<float>;
     // 大腿摆杆顺时针转到小腿摆杆的角度，范围 [0, 2pi)。
@@ -59,7 +59,7 @@ void leg_observer::leg_pos_clc(leg_data& data)
     data.leg_len = sqrtf(data.leg_pos_x*data.leg_pos_x + data.leg_pos_y*data.leg_pos_y);
 }
 
-void leg_observer::leg_after_clc()
+void Leg_observer::leg_after_clc()
 {
     leg_data *ptr[2]={&leg_data_left, &leg_data_right};
     for (auto i:ptr)
