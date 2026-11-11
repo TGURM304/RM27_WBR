@@ -43,4 +43,13 @@
 
 
 
+namespace chassis_config {
+// 传感器到机体，绕 Z 轴旋转 180°。
+inline constexpr float imu_sensor_to_body[9] = {
+    -1.0f,  0.0f, 0.0f,
+     0.0f, -1.0f, 0.0f,
+     0.0f,  0.0f, 1.0f
+};
+}
+
 #endif //TROBOT_CHASSIS_DATA_CONIFG_H

@@ -31,7 +31,7 @@ namespace Controller
             float left_len, float right_len);
         void lqr_set_zero(chassis_state zero_state);
         void lqr_disable();
-        void lqr_enable();
+        void lqr_enable(const chassis_state& state);
         output get_output() const { return output_; }
     private:
         void coef_clc(float left_len, float right_len);

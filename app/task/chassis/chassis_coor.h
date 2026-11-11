@@ -30,11 +30,16 @@ namespace Coordinator
         leg_state left_leg_state, right_leg_state;
         float kalman_acc, kalman_vel;
     }processed_data;
+    struct chassis_output
+    {
+        Controller::output lqr;
+        out_put_tor left_leg, right_leg;
+    };
     class chassis_coor
     {
     public:
         chassis_coor() = delete;
-        // lqr_ctrl 为 nullptr 时只控制双腿，不计算或输出 LQR。
+        // lqr_ctrl 为 nullptr 时使用内部固定 K。
         chassis_coor(ChassisLQR *lqr_ctrl, LegController *left_leg_ctrl,
             LegController *right_leg_ctrl, Base_data_observer *base_data_observer,
             Leg_observer *left_leg_observer, Leg_observer *right_leg_observer, comp_ptr motors)
@@ -51,7 +56,9 @@ namespace Coordinator
         void chassis_scheduler();//做规划，对解析的命令转化成控制要求
         void chassis_controller();//控制机器人运动，计算机器人运动电机所需力矩
         void chassis_actuator();//输出电机力矩
+        [[nodiscard]] const chassis_output& get_output() const { return output_; }
     private:
+        ChassisLQR fixed_lqr_{};
         ChassisLQR *lqr_ctrl_;
         LegController *left_leg_ctrl_, *right_leg_ctrl_;
         Leg_observer *left_leg_observer_, *right_leg_observer_;
@@ -60,8 +67,7 @@ namespace Coordinator
         bool static_leg = false, lqr_enabled_ = false;
         chassis_state lqr_state_{};
         leg_ctrl_data left_cmd_{}, right_cmd_{};
-        output lqr_output_{};
-        out_put_tor left_output_{}, right_output_{};
+        chassis_output output_{};
 
         //受到严格保护的更新和存储函数
     private:

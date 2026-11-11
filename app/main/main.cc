@@ -8,6 +8,7 @@
 
 #include "bsp/buzzer.h"
 #include "ins/ins.h"
+#include "chassis_data_conifg.h"
 #include "music/music.h"
 #include "rc/dr16.h"
 #include "rc/ht10.h"
@@ -48,7 +49,7 @@ extern "C" [[noreturn]] void app_entrance(void *args) {
         bsp_led_set(hw_failed == 0 ? 0 : 50, hw_failed == 0 ? 50 : 0, 0);
     }
 
-    ins::init();
+    ins::init(math::matrix<3, 3>(chassis_config::imu_sensor_to_body));
     while (!ins::ready()) os::task::sleep(5), bsp_iwdg_refresh();
 
     music::play_blocking(ready_tone);

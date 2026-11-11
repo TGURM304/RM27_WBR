@@ -12,8 +12,11 @@ namespace {
 constexpr float pi = std::numbers::pi_v<float>;
 constexpr float two_pi = 2.0f * pi;
 constexpr double two_pi_double = 2.0 * std::numbers::pi;
-// 沿用现有配置名称，含义为转子转数 / 轮轴转数；当前 0.3 为占位。
+constexpr int rotor_counts_per_turn = 8192;
+constexpr int rotor_half_turn = rotor_counts_per_turn / 2;
+// 转子转数 / 轮轴转数。
 constexpr float reduction = WHEEL_REDUCTION;
+constexpr double wheel_rad_per_count = two_pi_double / (rotor_counts_per_turn * static_cast<double>(reduction));
 // 按 dji.cc 的系数约定，将原装减速比下的 0.3 N·m/A 折算到转子侧。
 constexpr float rotor_torque_constant = 0.3f / (3591.0f / 187.0f);
 static_assert(reduction > 0 && WHEEL_RADIUS > 0 && WHEEL_CHASSIS_HZ > 0);
@@ -79,22 +82,22 @@ void Observer::Base_data_observer::wheel_process(const motor::dji::feedback_t &f
     if(feedback.timestamp == 0) return;
     if(history.sampled) {
         int delta = static_cast<int>(feedback.raw.angle) - history.last_angle;
-        if(delta > 4096) delta -= 8192;
-        if(delta < -4096) delta += 8192;
-        history.count += delta;
+        if(delta > rotor_half_turn) delta -= rotor_counts_per_turn;
+        if(delta < -rotor_half_turn) delta += rotor_counts_per_turn;
+        history.rotor_count += delta;
     } else {
         history.sampled = true;
     }
     history.last_angle = feedback.raw.angle;
-    const double total = dir * static_cast<double>(history.count) * two_pi_double / (8192.0 * reduction);
-    double angle = std::fmod(total, two_pi_double);
+    const double wheel_total_angle = dir * static_cast<double>(history.rotor_count) * wheel_rad_per_count;
+    double angle = std::fmod(wheel_total_angle, two_pi_double);
     if(angle < 0) angle += two_pi_double;
     result.angle = static_cast<float>(angle);
     if(result.angle >= two_pi) result.angle = 0; // float 舍入时仍保持半开区间
-    result.total_angle = static_cast<float>(total);
+    result.total_angle = static_cast<float>(wheel_total_angle);
     result.angular_velocity = dir * feedback.raw.speed * two_pi / (60.0f * reduction);
     const float current = feedback.raw.current * (20.0f / 16384.0f);
     result.torque = dir * current * rotor_torque_constant * reduction;
-    result.distance = static_cast<float>(total * WHEEL_RADIUS);
+    result.distance = static_cast<float>(wheel_total_angle * WHEEL_RADIUS);
     result.linear_velocity = result.angular_velocity * WHEEL_RADIUS;
 }

@@ -21,14 +21,15 @@ struct joints {
 };
 
 struct motors {
-    float angle, total_angle; // rad：[0, 2π)、相对计零的连续角
+    float angle; // 轮轴单圈角，rad，[0, 2π)
+    float total_angle; // 相对计零的有符号轮轴累计角，rad
     float angular_velocity, torque; // rad/s、N·m（电流估算）
     float distance, linear_velocity; // m、m/s，有符号
 };
 
 struct body_posture {
     float body_theta, body_phi, body_roll; // pitch、yaw、roll，rad
-    float body_gyro_x, body_gyro_y, body_gyro_z; // 机体轴角速度，rad/s
+    float body_gyro_roll, body_gyro_pitch, body_gyro_yaw; // 绕机体 X/Y/Z 轴的角速度，rad/s
     float body_x_acc, body_y_acc, body_z_acc; // m/s²，未扣除重力
 };
 
@@ -50,7 +51,7 @@ public:
 
 private:
     struct wheel_history {
-        int64_t count = 0;
+        int64_t rotor_count = 0;
         int16_t last_angle = 0;
         bool sampled = false;
     };

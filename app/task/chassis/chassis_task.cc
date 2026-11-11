@@ -48,13 +48,6 @@ motor::dm::param_t joint_param(uint8_t id) {
         coor.chassis_scheduler();
         coor.chassis_controller();
         coor.chassis_actuator();
-        const auto measured = legs.get_leg_data();
-        const auto left_out = leg_ctrl[0].get_output(), right_out = leg_ctrl[1].get_output();
-        bsp_uart_printf(E_UART_1, "%f,%f,%f,%f,%f,%f,%f,%f\r\n",
-            measured.first.leg_len, measured.second.leg_len,
-            measured.first.leg_phi, measured.second.leg_phi,
-            left_out.len_ctrl_small + left_out.rad_ctrl_small, left_out.len_ctrl_big + left_out.rad_ctrl_big,
-            right_out.len_ctrl_small + right_out.rad_ctrl_small, right_out.len_ctrl_big + right_out.rad_ctrl_big);
         vTaskDelayUntil(&wake_time, configTICK_RATE_HZ / WHEEL_CHASSIS_HZ);
     }
 }

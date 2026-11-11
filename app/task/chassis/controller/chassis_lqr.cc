@@ -58,12 +58,29 @@ void ChassisLQR::lqr_clc(float target_vel, float target_omega, chassis_state sta
     target_pos.dot_x = target_vel;
     target_pos.dot_phi = target_omega;
     if (fit) coef_clc(left_len, right_len);
+    // const float error[10] = {
+    //     target_pos.x - current_pos.x,
+    //     target_pos.dot_x - current_pos.dot_x,
+    //     wrap_angle(target_pos.phi - current_pos.phi),
+    //     target_pos.dot_phi - current_pos.dot_phi,
+    //     -current_pos.left_theta,
+    //     -current_pos.dot_left_theta,
+    //     -current_pos.right_theta,
+    //     -current_pos.dot_right_theta,
+    //     -current_pos.theta,
+    //     -current_pos.dot_theta
+    // };
     const float error[10] = {
-        target_pos.x - current_pos.x, target_pos.dot_x - current_pos.dot_x,
-        wrap_angle(target_pos.phi - current_pos.phi), target_pos.dot_phi - current_pos.dot_phi,
-        -current_pos.left_theta, -current_pos.dot_left_theta,
-        -current_pos.right_theta, -current_pos.dot_right_theta,
-        -current_pos.theta, -current_pos.dot_theta
+        -current_pos.x,
+        -current_pos.dot_x,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        -current_pos.theta,
+        -current_pos.dot_theta
     };
     float tor[4] = {};
     for (int i = 0; i < 4; ++i)
@@ -90,9 +107,9 @@ void ChassisLQR::lqr_disable()
     reference_ready = false;
 }
 
-void ChassisLQR::lqr_enable()
+void ChassisLQR::lqr_enable(const chassis_state& state)
 {
     if (enable_flag) return;
-    reference_ready = false;
+    lqr_set_zero(state);
     enable_flag = true;
 }
