@@ -48,14 +48,16 @@ namespace Controller
             rad_pid.init(rad_);
             omega_pid.init(omega_);
         }
-        void leg_ctrl_clc(leg_ctrl_data ctrl);
+        // 两个开关分别控制腿长和腿摆角闭环，前馈由总使能控制。
+        void leg_ctrl_clc(leg_ctrl_data ctrl, bool enable_len, bool enable_rad);
         void leg_clear();
         void leg_disable();
         void leg_enable();
         out_put_tor get_output(){return output_;};
         private:
             void leg_forward_clc();
-            void leg_pos_ctrl();
+            void leg_len_ctrl();
+            void leg_rad_ctrl();
             leg_ctrl_data leg_ctrl_{};
             out_put_tor output_{};
             bool ctrl_flag = false;

@@ -63,9 +63,9 @@ namespace Coordinator
         Leg_observer *left_leg_observer_, *right_leg_observer_;
         Base_data_observer *base_data_observer_;
         comp_ptr motors_;
-        enum class lqr_mode { none, stool_balance, full_control };
-        lqr_mode lqr_mode_ = lqr_mode::none;
-        bool static_leg = false, lqr_enabled_ = false;
+        enum class lqr_mode { rest, bench_control, full_control };
+        lqr_mode lqr_mode_ = lqr_mode::rest;
+        bool static_leg = false;
         float target_vel_ = 0.0f, target_omega_ = 0.0f; // m/s、rad/s
         chassis_state lqr_state_{};
         leg_ctrl_data left_cmd_{}, right_cmd_{};
