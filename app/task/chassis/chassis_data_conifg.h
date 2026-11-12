@@ -41,7 +41,7 @@
 #define LEG_LEN_AG (LEG_LEN_AD+LEG_LEN_DG)
 #define LEG_LEN_GW 0.250f
 
-
+#define LEG_STATIC_OFFSET (-0.30)
 
 namespace chassis_config {
 // 传感器到机体，绕 Z 轴旋转 180°。

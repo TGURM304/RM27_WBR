@@ -39,7 +39,8 @@ motor::dm::param_t joint_param(uint8_t id) {
     const controller::pid::pid_para_t len{5, 0, 0, 0, 0.8f}, speed{150, 10, 0, 20, 50};
     const controller::pid::pid_para_t rad{20, 0, 0, 0, 2}, omega{8, 1, 0, 3, 10};
     Controller::LegController leg_ctrl[] = {{len, speed, rad, omega}, {len, speed, rad, omega}};
-    Coordinator::chassis_coor coor(nullptr, &leg_ctrl[0], &leg_ctrl[1], &base, &legs, &legs, motors);
+    Controller::ChassisLQR lqr_ctrl_{};
+    Coordinator::chassis_coor coor(&lqr_ctrl_, &leg_ctrl[0], &leg_ctrl[1], &base, &legs, &legs, motors);
     TickType_t wake_time = xTaskGetTickCount();
     for(;;) {
         coor.chassis_observer();

@@ -39,7 +39,7 @@ namespace Coordinator
     {
     public:
         chassis_coor() = delete;
-        // lqr_ctrl 为 nullptr 时使用内部固定 K。
+        // lqr_ctrl 为 nullptr 时跳过 LQR 计算。
         chassis_coor(ChassisLQR *lqr_ctrl, LegController *left_leg_ctrl,
             LegController *right_leg_ctrl, Base_data_observer *base_data_observer,
             Leg_observer *left_leg_observer, Leg_observer *right_leg_observer, comp_ptr motors)
@@ -58,13 +58,15 @@ namespace Coordinator
         void chassis_actuator();//输出电机力矩
         [[nodiscard]] const chassis_output& get_output() const { return output_; }
     private:
-        ChassisLQR fixed_lqr_{};
         ChassisLQR *lqr_ctrl_;
         LegController *left_leg_ctrl_, *right_leg_ctrl_;
         Leg_observer *left_leg_observer_, *right_leg_observer_;
         Base_data_observer *base_data_observer_;
         comp_ptr motors_;
+        enum class lqr_mode { none, stool_balance, full_control };
+        lqr_mode lqr_mode_ = lqr_mode::none;
         bool static_leg = false, lqr_enabled_ = false;
+        float target_vel_ = 0.0f, target_omega_ = 0.0f; // m/s、rad/s
         chassis_state lqr_state_{};
         leg_ctrl_data left_cmd_{}, right_cmd_{};
         chassis_output output_{};

@@ -59,6 +59,7 @@ void Leg_observer::leg_pos_clc(leg_data& data)
     data.leg_len = sqrtf(data.leg_pos_x*data.leg_pos_x + data.leg_pos_y*data.leg_pos_y);
 }
 
+//数据后处理，处理内容为各类导数
 void Leg_observer::leg_after_clc()
 {
     leg_data *ptr[2]={&leg_data_left, &leg_data_right};

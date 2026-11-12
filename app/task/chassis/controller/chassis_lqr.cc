@@ -9,18 +9,10 @@
 using namespace Controller;
 
 namespace {
+// 将偏航角或角差归入 ±π 范围，跨圈时保留最短转向。
 float wrap_angle(float angle) {
     return atan2f(sinf(angle), cosf(angle));
 }
-}
-
-ChassisLQR::ChassisLQR():ChassisLQR(false) {}
-
-ChassisLQR::ChassisLQR(bool fit):fit(fit)
-{
-    for (int i = 0; i < 4; ++i)
-        for (int j = 0; j < 10; ++j)
-            matrix_K[i][j] = static_matrix_K[i][j];
 }
 
 void ChassisLQR::coef_clc(float left_len, float right_len)
@@ -39,8 +31,8 @@ void ChassisLQR::coef_clc(float left_len, float right_len)
     }
 }
 
-void ChassisLQR::lqr_clc(float target_vel, float target_omega, chassis_state state,
-    float left_len, float right_len)
+void ChassisLQR::lqr_clc_staticK(float target_vel, float target_omega, const chassis_state& state,
+    const float (*gain)[10])
 {
     current_pos = state;
     current_pos.x -= zero_pos.x;
@@ -57,36 +49,41 @@ void ChassisLQR::lqr_clc(float target_vel, float target_omega, chassis_state sta
     target_pos.phi = wrap_angle(target_pos.phi + target_omega * dt);
     target_pos.dot_x = target_vel;
     target_pos.dot_phi = target_omega;
-    if (fit) coef_clc(left_len, right_len);
-    // const float error[10] = {
-    //     target_pos.x - current_pos.x,
-    //     target_pos.dot_x - current_pos.dot_x,
-    //     wrap_angle(target_pos.phi - current_pos.phi),
-    //     target_pos.dot_phi - current_pos.dot_phi,
-    //     -current_pos.left_theta,
-    //     -current_pos.dot_left_theta,
-    //     -current_pos.right_theta,
-    //     -current_pos.dot_right_theta,
-    //     -current_pos.theta,
-    //     -current_pos.dot_theta
-    // };
+
     const float error[10] = {
-        -current_pos.x,
-        -current_pos.dot_x,
-        0,
-        0,
-        0,
-        0,
-        0,
-        0,
+        target_pos.x - current_pos.x - 0.3f,
+        target_pos.dot_x - current_pos.dot_x,
+        wrap_angle(target_pos.phi - current_pos.phi),
+        target_pos.dot_phi - current_pos.dot_phi,
+        -current_pos.left_theta,
+        -current_pos.dot_left_theta,
+        -current_pos.right_theta,
+        -current_pos.dot_right_theta,
         -current_pos.theta,
         -current_pos.dot_theta
     };
     float tor[4] = {};
     for (int i = 0; i < 4; ++i)
         for (int j = 0; j < 10; ++j)
-            tor[i] += matrix_K[i][j] * error[j];
+            tor[i] += gain[i][j] * error[j];
     output_ = {tor[0], tor[1], tor[2], tor[3]};
+}
+
+void ChassisLQR::lqr_clc_bench(float target_vel, float target_omega, chassis_state state,
+    const float (*gain)[10])
+{
+    state.left_theta = 0.0f;
+    state.dot_left_theta = 0.0f;
+    state.right_theta = 0.0f;
+    state.dot_right_theta = 0.0f;
+    lqr_clc_staticK(target_vel, target_omega, state, gain);
+}
+
+void ChassisLQR::lqr_clc_fitted(float target_vel, float target_omega, const chassis_state& state,
+    float left_len, float right_len)
+{
+    if (enable_flag) coef_clc(left_len, right_len);
+    lqr_clc_staticK(target_vel, target_omega, state, matrix_K);
 }
 
 void ChassisLQR::lqr_set_zero(chassis_state zero_state)

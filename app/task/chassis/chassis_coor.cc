@@ -4,6 +4,7 @@
 
 #include "chassis_coor.h"
 #include "chassis_data_conifg.h"
+#include <algorithm>
 #include <cmath>
 #include <numbers>
 
@@ -15,22 +16,33 @@ constexpr float target_leg_rad = 0.5f * std::numbers::pi_v<float>;
 
 void chassis_coor::chassis_observer()
 {
+    //更新电机和IMU信息
     base_data_observer_->chassis_tick();
     base_.update_data(base_data_observer_->get_chassis_data());
     const auto& b = base_.get_data();
-    const auto& c = chassis_.get_data();
+
+    //腿部数据处理
     left_leg_observer_->leg_tick(b.j4.pos_, b.j3.pos_, b.j1.pos_, b.j2.pos_);
     if (right_leg_observer_ != left_leg_observer_)
         right_leg_observer_->leg_tick(b.j4.pos_, b.j3.pos_, b.j1.pos_, b.j2.pos_);
     const auto left = left_leg_observer_->get_leg_data().first;
     const auto right = right_leg_observer_->get_leg_data().second;
     processed_data next{};
+
+    //腿控制和LQR控制所需要用到的状态均存在chassis_变量中
+    //更新LQR状态
     next.lqr_state.x = (b.motor_left.total_angle+b.motor_right.total_angle)*WHEEL_RADIUS/2;
-    next.lqr_state.dot_x = (b.motor_left.angular_velocity+b.motor_left.angular_velocity)*WHEEL_RADIUS/2;
+    next.lqr_state.dot_x = (b.motor_left.linear_velocity + b.motor_right.linear_velocity)/2;//这个是线速度！
     next.lqr_state.theta = b.body.body_theta;
     next.lqr_state.dot_theta = b.body.body_gyro_pitch;
+    next.lqr_state.left_theta = left.leg_phi-PI/2;
+    next.lqr_state.dot_left_theta = left.leg_phi_dot;
+    next.lqr_state.right_theta = right.leg_phi-PI/2;
+    next.lqr_state.dot_right_theta = right.leg_phi_dot;
     next.lqr_state.phi = b.body.body_phi;
     next.lqr_state.dot_phi = b.body.body_gyro_yaw;
+
+    //更新腿状态
     next.left_leg_state = {left.leg_phi, left.leg_phi_dot, left.leg_len, left.leg_len_dot};
     next.right_leg_state = {right.leg_phi, right.leg_phi_dot, right.leg_len, right.leg_len_dot};
     chassis_.update_data(next);
@@ -38,10 +50,21 @@ void chassis_coor::chassis_observer()
 
 void chassis_coor::chassis_command()
 {
-    if (remote->s_l == 1) static_leg =true;
-    else static_leg = false;
-    if (remote->s_r == 1 && remote->s_l == 1) lqr_enabled_ = true;
-    else lqr_enabled_ = false;
+    const auto right_switch = remote->s_r;
+    static_leg = remote->s_l == 1;
+    lqr_enabled_ = static_leg && right_switch == 1;
+
+    if (static_leg && right_switch == 0) {
+        lqr_mode_ = lqr_mode::stool_balance;
+    } else if (lqr_enabled_) {
+        lqr_mode_ = lqr_mode::full_control;
+    } else {
+        lqr_mode_ = lqr_mode::none;
+    }
+
+    //遥感目标控制命令
+    target_vel_ = std::clamp(remote->rc_l[1] / 800.0f, -1.0f, 1.0f);
+    target_omega_ = -2.0f * std::clamp(remote->reserved / 660.0f, -1.0f, 1.0f);
 }
 
 void chassis_coor::chassis_protection()
@@ -55,6 +78,8 @@ void chassis_coor::chassis_scheduler()
     lqr_state_ = lqr_enabled_ ? c.lqr_state : chassis_state{};
     left_cmd_ = {};
     right_cmd_ = {};
+
+    //腿长控制计算
     const bool leg_enabled = static_leg || lqr_enabled_;
     left_cmd_.target_len = leg_enabled ? 0.18f : c.left_leg_state.current_len;
     right_cmd_.target_len = leg_enabled ? 0.18f : c.right_leg_state.current_len;
@@ -82,14 +107,13 @@ void chassis_coor::chassis_controller()
 {
     left_leg_ctrl_->leg_enable();
     right_leg_ctrl_->leg_enable();
-    auto& lqr = lqr_ctrl_ ? *lqr_ctrl_ : fixed_lqr_;
     output_.lqr = {};
-    if (lqr_enabled_) {
-        lqr.lqr_enable(lqr_state_);
-        lqr.lqr_clc(0.0f, 0.0f, lqr_state_, left_cmd_.current_len, right_cmd_.current_len);
-        output_.lqr = lqr.get_output();
-    } else {
-        lqr.lqr_disable();
+    if (lqr_ctrl_ && lqr_enabled_) {
+        lqr_ctrl_->lqr_enable(lqr_state_);
+        lqr_ctrl_->lqr_clc_bench(target_vel_, target_omega_, lqr_state_, static_matrix_K);
+        output_.lqr = lqr_ctrl_->get_output();
+    } else if (lqr_ctrl_) {
+        lqr_ctrl_->lqr_disable();
     }
     left_cmd_.forward_tor_M = 0;
     right_cmd_.forward_tor_M = 0;
@@ -103,7 +127,6 @@ void chassis_coor::chassis_controller()
     right_leg_ctrl_->leg_ctrl_clc(right_cmd_);
     output_.left_leg = left_leg_ctrl_->get_output();
     output_.right_leg = right_leg_ctrl_->get_output();
-    output_.lqr = lqr.get_output();
 }
 
 void chassis_coor::chassis_actuator()
@@ -130,13 +153,14 @@ void chassis_coor::chassis_actuator()
             constexpr float rotor_kt = WHEEL_ORIGINAL_TORQUE_CONSTANT / WHEEL_ORIGINAL_REDUCTION;
             constexpr float torque_to_current = WHEEL_MAX_RAW_CURRENT / (WHEEL_MAX_CURRENT * rotor_kt * WHEEL_REDUCTION);
             auto c = chassis_.get_data();
+            auto b = base_data_observer_->get_chassis_data();
             auto ins =ins::data();
             bsp_uart_printf(E_UART_1,"%f,%f,%f,%f,%f\r\n",
-                output_.lqr.T_w_l * LEFT_MOTOR_DIR * torque_to_current,
-                output_.lqr.T_w_r * LEFT_MOTOR_DIR * torque_to_current,
-                c.lqr_state.theta/PI*180.0f,
-                c.lqr_state.dot_theta,
-                c.lqr_state.x
+                c.lqr_state.x,
+                b.motor_left.linear_velocity,
+                b.motor_right.linear_velocity,
+                b.motor_left.total_angle,
+                b.motor_right.total_angle
                 );
 
             motors_.left->update(output_.lqr.T_w_l * LEFT_MOTOR_DIR * torque_to_current);
