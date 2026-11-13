@@ -152,8 +152,6 @@ void chassis_coor::chassis_controller()
     constexpr float support_force_y = CAR_WEIGHT / 4.0f * 9.8f;
     const float left_support_force = support_force_y * support_scale(lqr_state_.left_theta);
     const float right_support_force = support_force_y * support_scale(lqr_state_.right_theta);
-    // left_cmd_.forward_tor_M = output_.lqr.forward_T_bl;
-    // right_cmd_.forward_tor_M = output_.lqr.forward_T_br;
     left_cmd_.forward_tor_M  = 0;
     right_cmd_.forward_tor_M = 0;
     left_cmd_.forward_force_L = full_control ? left_support_force * sinf(left_cmd_.current_rad) : 0.0f;
@@ -205,20 +203,19 @@ void chassis_coor::chassis_actuator()
         if (lqr_mode_!= lqr_mode::rest) {
             const auto& c = chassis_.get_data();
             const auto& b = base_.get_data();
-            bsp_uart_printf(E_UART_1,"%f,%f,%f,%f,%f\r\n",
-                c.lqr_state.x,
-                c.left_leg_state.current_len,
-                output_.lqr.forward_T_br,
-                output_.lqr.forward_T_wl,
-                output_.lqr.forward_T_wr
+            kalman_vel_observer_.chassis_move_clc(c.left_leg_state,c.right_leg_state,b);
+            auto vel = kalman_vel_observer_.get_vel_x();
+            auto acc = kalman_vel_observer_.get_acc_x();
+            bsp_uart_printf(E_UART_1,"%f,%f,%f\r\n",
+                c.lqr_state.dot_x,
+                vel,
+                acc/9.8f
                 );
         }
         if (lqr_ctrl_ && lqr_mode_ != lqr_mode::rest) {
             // 按原装力矩常数和当前减速比，将轮轴 N·m 换算为原始电流指令。
             constexpr float rotor_kt = WHEEL_ORIGINAL_TORQUE_CONSTANT / WHEEL_ORIGINAL_REDUCTION;
             constexpr float torque_to_current = WHEEL_MAX_RAW_CURRENT / (WHEEL_MAX_CURRENT * rotor_kt * WHEEL_REDUCTION);
-            // motors_.left->update((output_.lqr.T_w_l+output_.lqr.forward_T_wl) * LEFT_MOTOR_DIR * torque_to_current);
-            // motors_.right->update((output_.lqr.T_w_r+output_.lqr.forward_T_wr) * RIGHT_MOTOR_DIR * torque_to_current);
             motors_.left->update((output_.lqr.T_w_l) * LEFT_MOTOR_DIR * torque_to_current);
             motors_.right->update((output_.lqr.T_w_r) * RIGHT_MOTOR_DIR * torque_to_current);
             // motors_.left->update(0);

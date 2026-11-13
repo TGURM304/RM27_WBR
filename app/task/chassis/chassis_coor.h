@@ -10,6 +10,7 @@
 #include "chassis_lqr.h"
 #include "leg_controller.h"
 #include "Base_data_observer.h"
+#include "chassis_vel_observer.h"
 #include "leg_data_observer.h"
 #include "rc/dr16.h"
 using namespace Controller;
@@ -18,12 +19,12 @@ using namespace Observer;
 
 namespace Coordinator
 {
-    typedef struct {
+    struct leg_state {
         float current_rad;
         float current_omega;
         float current_len;
         float current_speed;
-    }leg_state;
+    };
     typedef struct
     {
         chassis_state lqr_state;
@@ -48,6 +49,7 @@ namespace Coordinator
         base_data_observer_(base_data_observer), motors_(motors)
         {
             remote = rc::dr16::data();
+            kalman_vel_observer_.enable();
 
         };
         void chassis_observer();//调用下面的两个私有的结构体更新内容
@@ -94,6 +96,7 @@ namespace Coordinator
         };//更新初步加工后的观测数据
         base_data base_;
         chassis_data chassis_;
+        ChassisVelObserver kalman_vel_observer_{};
         const rc::dr16::data_t *remote;
     };
 }
