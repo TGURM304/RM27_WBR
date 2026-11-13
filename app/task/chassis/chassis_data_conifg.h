@@ -22,6 +22,7 @@
 #define LEFT_MOTOR_DIR (-1)
 #define RIGHT_MOTOR_DIR (1)
 
+//机体的物理数据
 #define WHEEL_RADIUS 0.058f
 #define WHEEL_REDUCTION (268.0f/17.0f)
 #define WHEEL_ORIGINAL_REDUCTION (3591.0f / 187.0f)
@@ -31,7 +32,7 @@
 #define WHEEL_MAX_RAW_CURRENT 16384.0f
 
 #define WHEEL_CHASSIS_HZ (1000)
-
+#define CAR_WEIGHT 20.0f
 
 #define LEG_LEN_AB 0.0945f
 #define LEG_LEN_AD LEG_LEN_AB
@@ -41,7 +42,10 @@
 #define LEG_LEN_AG (LEG_LEN_AD+LEG_LEN_DG)
 #define LEG_LEN_GW 0.250f
 
-#define LEG_STATIC_OFFSET (-0.30)
+//稳定后退的行程
+#define LEG_STATIC_OFFSET (0)
+#define LEG_LEN_MAX (0.32f)
+#define LEG_LEN_MIN (0.15f)
 
 namespace chassis_config {
 // 传感器到机体，绕 Z 轴旋转 180°。

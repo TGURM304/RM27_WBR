@@ -4,6 +4,7 @@
 
 #include "chassis_lqr.h"
 #include "chassis_data_conifg.h"
+#include <algorithm>
 #include <cmath>
 
 using namespace Controller;
@@ -15,13 +16,8 @@ float wrap_angle(float angle) {
 }
 }
 
-void ChassisLQR::coef_clc(float left_len, float right_len)
+void ChassisLQR::coef_clc(const float (&basis)[10])
 {
-    // 当前导出系数约定：x 为右腿长，y 为左腿长，单位 m。
-    const float x = right_len, y = left_len;
-    const float x2 = x * x, y2 = y * y;
-    const float basis[10] = {1.0f, x, y, x2, x * y, y2,
-                            x2 * x, x2 * y, x * y2, y2 * y};
     for (int i = 0; i < 4; ++i) {
         for (int j = 0; j < 10; ++j) {
             matrix_K[i][j] = 0.0f;
@@ -33,6 +29,12 @@ void ChassisLQR::coef_clc(float left_len, float right_len)
 
 void ChassisLQR::lqr_clc_staticK(float target_vel, float target_omega, const chassis_state& state,
     const float (*gain)[10])
+{
+    lqr_feedback_clc(target_vel, target_omega, state, gain, 0.0f);
+}
+
+void ChassisLQR::lqr_feedback_clc(float target_vel, float target_omega, const chassis_state& state,
+    const float (*gain)[10], float feed_dis)
 {
     current_pos = state;
     current_pos.x -= zero_pos.x;
@@ -51,7 +53,7 @@ void ChassisLQR::lqr_clc_staticK(float target_vel, float target_omega, const cha
     target_pos.dot_phi = target_omega;
 
     const float error[10] = {
-        target_pos.x - current_pos.x - 0.3f,
+        target_pos.x - current_pos.x - feed_dis,
         target_pos.dot_x - current_pos.dot_x,
         wrap_angle(target_pos.phi - current_pos.phi),
         target_pos.dot_phi - current_pos.dot_phi,
@@ -66,7 +68,10 @@ void ChassisLQR::lqr_clc_staticK(float target_vel, float target_omega, const cha
     for (int i = 0; i < 4; ++i)
         for (int j = 0; j < 10; ++j)
             tor[i] += gain[i][j] * error[j];
-    output_ = {tor[0], tor[1], tor[2], tor[3]};
+    output_.T_w_l = tor[0];
+    output_.T_w_r = tor[1];
+    output_.T_b_l = tor[2];
+    output_.T_b_r = tor[3];
 }
 
 void ChassisLQR::lqr_clc_bench(float target_vel, float target_omega, chassis_state state,
@@ -82,8 +87,40 @@ void ChassisLQR::lqr_clc_bench(float target_vel, float target_omega, chassis_sta
 void ChassisLQR::lqr_clc_fitted(float target_vel, float target_omega, const chassis_state& state,
     float left_len, float right_len)
 {
-    if (enable_flag) coef_clc(left_len, right_len);
-    lqr_clc_staticK(target_vel, target_omega, state, matrix_K);
+    if (!enable_flag) {
+        output_ = {};
+        return;
+    }
+
+    // K 和 Ud 共用 poly33 基函数，x 为右腿长，y 为左腿长，单位 m。
+    const float x = right_len, y = left_len;
+    const float x2 = x * x, y2 = y * y;
+    const float basis[10] = {1.0f, x, y, x2, x * y, y2,
+                            x2 * x, x2 * y, x * y2, y2 * y};
+    coef_clc(basis);
+    // 七组实测数据的二次最小二乘拟合，腿长和位移补偿均为 m。
+    const float mean_leg_len = 0.5f * (left_len + right_len);
+    const float delta_len = std::clamp(mean_leg_len, 0.15f, 0.32f) - 0.23f;
+    const float feed_dis = (2.142075f - 6.214766f * delta_len) * delta_len - 0.280264f;
+    lqr_feedback_clc(target_vel, target_omega, state, matrix_K, feed_dis);
+    forward_feed(basis);
+}
+
+void ChassisLQR::forward_feed(const float (&basis)[10])
+{
+    float ud[4] = {};
+    for (int i = 0; i < 4; ++i)
+        for (int j = 0; j < 10; ++j)
+            ud[i] += kU_dPoly_whole[i][j] * basis[j];
+
+    output_.forward_T_wl = ud[0];
+    output_.forward_T_wr = ud[1];
+    output_.forward_T_bl = ud[2];
+    output_.forward_T_br = ud[3];
+    output_.T_w_l += ud[0];
+    output_.T_w_r += ud[1];
+    output_.T_b_l += ud[2];
+    output_.T_b_r += ud[3];
 }
 
 void ChassisLQR::lqr_set_zero(chassis_state zero_state)

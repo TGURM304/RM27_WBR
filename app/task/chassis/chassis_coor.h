@@ -66,7 +66,8 @@ namespace Coordinator
         enum class lqr_mode { rest, bench_control, full_control };
         lqr_mode lqr_mode_ = lqr_mode::rest;
         bool static_leg = false;
-        float target_vel_ = 0.0f, target_omega_ = 0.0f; // m/s、rad/s
+        float target_vel_ = 0.0f, target_omega_ = 0.0f, target_leg_vel = 0.0f; // m/s、rad/s
+        float target_height_ = 0.18f; // m
         chassis_state lqr_state_{};
         leg_ctrl_data left_cmd_{}, right_cmd_{};
         chassis_output output_{};
