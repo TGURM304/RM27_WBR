@@ -200,18 +200,20 @@ void chassis_coor::chassis_actuator()
         // motors_.right_back->control(0, 0, 0, 0, 0);
         // motors_.left_back->control(0, 0, 0, 0, 0);
         // motors_.left_forward->control(0, 0, 0, 0, 0);
-        if (lqr_mode_!= lqr_mode::rest) {
             const auto& c = chassis_.get_data();
             const auto& b = base_.get_data();
             kalman_vel_observer_.chassis_move_clc(c.left_leg_state,c.right_leg_state,b);
             auto vel = kalman_vel_observer_.get_vel_x();
             auto acc = kalman_vel_observer_.get_acc_x();
-            bsp_uart_printf(E_UART_1,"%f,%f,%f\r\n",
-                c.lqr_state.dot_x,
-                vel,
-                acc/9.8f
+            bsp_uart_printf(E_UART_1,"%f,%f,%f,%f,%f,%f,%f\r\n",
+                (float)b.j1.state,
+                (float)b.j2.state,
+                (float)b.j3.state,
+                (float)b.j4.state,
+                left_cmd_.target_len,
+                right_cmd_.target_len,
+                target_height_
                 );
-        }
         if (lqr_ctrl_ && lqr_mode_ != lqr_mode::rest) {
             // 按原装力矩常数和当前减速比，将轮轴 N·m 换算为原始电流指令。
             constexpr float rotor_kt = WHEEL_ORIGINAL_TORQUE_CONSTANT / WHEEL_ORIGINAL_REDUCTION;
