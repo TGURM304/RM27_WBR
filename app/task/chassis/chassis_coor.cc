@@ -40,7 +40,7 @@ void chassis_coor::chassis_observer()
     //腿控制和LQR控制所需要用到的状态均存在chassis_变量中
     //更新LQR状态
     next.lqr_state.x = (b.motor_left.total_angle+b.motor_right.total_angle)*WHEEL_RADIUS/2;
-    next.lqr_state.dot_x = (b.motor_left.linear_velocity + b.motor_right.linear_velocity)/2;//这个是线速度！
+    next.lqr_state.dot_x = 0.5f * (b.motor_left.linear_velocity + b.motor_right.linear_velocity);
     next.lqr_state.theta = b.body.body_theta;
     next.lqr_state.dot_theta = b.body.body_gyro_pitch;
     next.lqr_state.left_theta = left.leg_phi-PI/2;
@@ -78,8 +78,8 @@ void chassis_coor::chassis_command()
     target_leg_vel = 0.3f*std::clamp(remote->rc_r[1] / 800.0f, -1.0f, 1.0f);
 }
 
-void chassis_coor::chassis_protection()
-{
+void chassis_coor::chassis_condition() {
+
 }
 
 void chassis_coor::chassis_scheduler()
@@ -200,19 +200,19 @@ void chassis_coor::chassis_actuator()
         // motors_.right_back->control(0, 0, 0, 0, 0);
         // motors_.left_back->control(0, 0, 0, 0, 0);
         // motors_.left_forward->control(0, 0, 0, 0, 0);
-            const auto& c = chassis_.get_data();
-            const auto& b = base_.get_data();
-            kalman_vel_observer_.chassis_move_clc(c.left_leg_state,c.right_leg_state,b);
-            auto vel = kalman_vel_observer_.get_vel_x();
-            auto acc = kalman_vel_observer_.get_acc_x();
-            bsp_uart_printf(E_UART_1,"%f,%f,%f,%f,%f,%f,%f\r\n",
+        const auto& c = chassis_.get_data();
+        const auto& b = base_.get_data();
+        constexpr float sigma_Q = 0.2f, sigma_R_vel = 0.2f, sigma_R_acc = 0.6f;
+        const float body_vel = kalman_vel_observer_.update(c.left_leg_state, c.right_leg_state, b,
+                                                          sigma_Q, sigma_R_vel, sigma_R_acc);
+        const float kalman_vel = kalman_vel_observer_.get_kalman_output(false);
+        bsp_uart_printf(E_UART_1,"%f,%f,%f,%f,%f,%f\r\n",
                 (float)b.j1.state,
                 (float)b.j2.state,
                 (float)b.j3.state,
-                (float)b.j4.state,
-                left_cmd_.target_len,
-                right_cmd_.target_len,
-                target_height_
+                c.lqr_state.dot_x,
+                body_vel,
+                kalman_vel
                 );
         if (lqr_ctrl_ && lqr_mode_ != lqr_mode::rest) {
             // 按原装力矩常数和当前减速比，将轮轴 N·m 换算为原始电流指令。
@@ -229,6 +229,7 @@ void chassis_coor::chassis_actuator()
     }
     else
     {
+        kalman_vel_observer_.clear();
         motors_.right_forward->control(0, 0, 0, 0, 0);
         motors_.right_back->control(0, 0, 0, 0, 0);
         motors_.left_back->control(0, 0, 0, 0, 0);
@@ -236,4 +237,10 @@ void chassis_coor::chassis_actuator()
         motors_.left->update(0);
         motors_.right->update(0);
     }
+}
+
+//这个函数是不受到外部控制命令影响的
+void chassis_coor::getup()
+{
+
 }

@@ -36,6 +36,20 @@ namespace Coordinator
         Controller::output lqr;
         out_put_tor left_leg, right_leg;
     };
+    typedef enum
+    {
+        E_REST,
+        E_STAND,
+        E_NORMAL,
+        E_STEP,
+        E_JUMP,
+        E_ERROR
+    }ctrl_enum;//用于枚举机器人当前状态
+    typedef struct
+    {
+        ctrl_enum ctrl;//底盘的控制状态机
+        float slip_norm;//归一化的缩写
+    }chassis_fsm;
     class chassis_coor
     {
     public:
@@ -54,11 +68,20 @@ namespace Coordinator
         };
         void chassis_observer();//调用下面的两个私有的结构体更新内容
         void chassis_command();//负责解析命令
-        void chassis_protection();//作保护
+        void chassis_condition();//做状态机规划，修改当前的控制状态
         void chassis_scheduler();//做规划，对解析的命令转化成控制要求
         void chassis_controller();//控制机器人运动，计算机器人运动电机所需力矩
         void chassis_actuator();//输出电机力矩
         [[nodiscard]] const chassis_output& get_output() const { return output_; }
+    //不同状态机的控制函数
+    private:
+        void getup();//自动翻身+起立
+        void base_chassis_ctrl();//基础的底盘控制，腿长+移动
+        void jump();//跳跃功能
+        void setp_up();//磕腿上台阶
+        void rest();//全部电机输出0，并且重新置零所有电机和观测器的积分累计内容
+        void restart();//重新置位和重新reset所有电机，然后进行enable
+    //成员变量
     private:
         ChassisLQR *lqr_ctrl_;
         LegController *left_leg_ctrl_, *right_leg_ctrl_;
@@ -73,7 +96,7 @@ namespace Coordinator
         chassis_state lqr_state_{};
         leg_ctrl_data left_cmd_{}, right_cmd_{};
         chassis_output output_{};
-
+        chassis_fsm fsm_{};
         //受到严格保护的更新和存储函数
     private:
         //以下内容需要为订阅发布制度的结构体，想要读写数据都需要通过下面的结构体，保证数据不会被乱写乱用

@@ -9,16 +9,18 @@
 #include "utils/os.h"
 
 namespace {
-motor::dm::param_t joint_param(uint8_t id) {
-    return {.slave_id = static_cast<uint8_t>(id + 0x10), .master_id = id,
+template <uint8_t SlaveId>
+motor::dm::param_t joint_param() {
+    static_assert(SlaveId <= 0x0Fu, "DM slave_id must be 0x00-0x0F: bits 4-7 overlap ERR in feedback byte D[0]");
+    return {.slave_id = SlaveId, .master_id = static_cast<uint8_t>(SlaveId + 0x10),
             .port = E_CAN_2, .mode = motor::dm::MIT,
             .p_max = 3.141593f, .v_max = 45.0f, .t_max = 30.0f};
 }
 }
 
 [[noreturn]] void chassis_task(void *) {
-    motor::dm joint[] = {{"j1", joint_param(1)}, {"j2", joint_param(2)},
-                         {"j3", joint_param(3)}, {"j4", joint_param(4)}};
+    motor::dm joint[] = {{"j1", joint_param<1>()}, {"j2", joint_param<2>()},
+                         {"j3", joint_param<3>()}, {"j4", joint_param<4>()}};
     motor::dji right("right", motor::dji::M3508, {1, E_CAN_1, motor::dji::CURRENT});
     motor::dji left("left", motor::dji::M3508, {2, E_CAN_1, motor::dji::CURRENT});
     for(auto &motor : joint) {
@@ -45,7 +47,7 @@ motor::dm::param_t joint_param(uint8_t id) {
     for(;;) {
         coor.chassis_observer();
         coor.chassis_command();
-        coor.chassis_protection();
+        coor.chassis_condition();
         coor.chassis_scheduler();
         coor.chassis_controller();
         coor.chassis_actuator();
