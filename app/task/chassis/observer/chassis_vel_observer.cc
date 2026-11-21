@@ -66,11 +66,13 @@ void ChassisVelObserver::clear()
     wheel_relative_vel_ = 0.0f;
     p_vv_ = p_va_ = p_aa_ = 0.0;
     kalman_initialized_ = false;
+    diagnostics_ = {};
 }
 
 float ChassisVelObserver::update(const Coordinator::leg_state& left_leg, const Coordinator::leg_state& right_leg,
                                  const chassis_basedata& chassis, float sigma_Q, float sigma_R_vel, float sigma_R_acc)
 {
+    diagnostics_ = {};
     if (!enabled_) return 0.0f;
     const auto& posture = chassis.body;
 
@@ -86,11 +88,23 @@ float ChassisVelObserver::update(const Coordinator::leg_state& left_leg, const C
     const float vel_wheel_left = WHEEL_RADIUS * (chassis.motor_left.angular_velocity + left_mount_rate + body_axle_rate);
     const float vel_wheel_right = WHEEL_RADIUS * (chassis.motor_right.angular_velocity + right_mount_rate + body_axle_rate);
     const float vel_wheel = 0.5f * (vel_wheel_left + vel_wheel_right);
-    const float relative_vel = 0.5f * (wheel_relative_velocity(left_leg, posture, body_to_level)
-                                    + wheel_relative_velocity(right_leg, posture, body_to_level));
+    const float relative_left = wheel_relative_velocity(left_leg, posture, body_to_level);
+    const float relative_right = wheel_relative_velocity(right_leg, posture, body_to_level);
+    const float relative_vel = 0.5f * (relative_left + relative_right);
     const float body_vel = vel_wheel - relative_vel;
+    // 横向位置 y 的前向速度为 -y * yaw_rate，与腿运动补偿使用同一投影。
+    const float yaw_rate = body_to_level(0, 0) * posture.body_gyro_yaw
+                         - body_to_level(0, 2) * posture.body_gyro_roll;
+    diagnostics_ = {vel_wheel_left - relative_left, vel_wheel_right - relative_right,
+                    body_vel, acc_x, yaw_rate,
+                    static_cast<float>(kalman_vel + (1.0 / WHEEL_CHASSIS_HZ) * kalman_acc), false};
+    const bool had_prediction = kalman_initialized_;
     if (chassis_kalman(body_vel, acc_x, sigma_Q, sigma_R_vel, sigma_R_acc) && std::isfinite(relative_vel)) {
         wheel_relative_vel_ = relative_vel;
+        diagnostics_.valid = had_prediction && std::isfinite(diagnostics_.left_velocity)
+                          && std::isfinite(diagnostics_.right_velocity) && std::isfinite(body_vel)
+                          && std::isfinite(acc_x) && std::isfinite(yaw_rate)
+                          && std::isfinite(diagnostics_.predicted_velocity);
     }
     return body_vel;
 }

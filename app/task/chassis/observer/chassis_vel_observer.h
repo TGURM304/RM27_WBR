@@ -13,6 +13,14 @@ namespace Coordinator
 
 namespace Observer
 {
+    struct velocity_diagnostics {
+        float left_velocity, right_velocity; // m/s，已扣除腿运动，尚未扣除横向安装点转动
+        float body_velocity, acc_x; // 机体前向速度测量及加速度，m/s、m/s²
+        float yaw_rate; // 横向安装点转动对前向轮差的等效角速度，rad/s
+        float predicted_velocity; // 本次校正前预测，m/s
+        bool valid; // 已有预测，且本轮测量和 KF 更新有效
+    };
+
     class ChassisVelObserver
     {
     public:
@@ -28,6 +36,7 @@ namespace Observer
         [[nodiscard]] float get_kalman_output(bool include_wheel_motion = true) const {
             return include_wheel_motion ? kalman_vel + wheel_relative_vel_ : kalman_vel;
         }
+        [[nodiscard]] velocity_diagnostics get_diagnostics() const { return diagnostics_; }
     private:
         bool chassis_kalman(float body_vel, float acc_x, float sigma_Q, float sigma_R_vel, float sigma_R_acc);
         float kalman_vel = 0.0f, kalman_acc = 0.0f;
@@ -35,6 +44,7 @@ namespace Observer
         double p_vv_ = 0.0, p_va_ = 0.0, p_aa_ = 0.0;
         bool enabled_ = false;
         bool kalman_initialized_ = false;
+        velocity_diagnostics diagnostics_{};
     };
 }
 

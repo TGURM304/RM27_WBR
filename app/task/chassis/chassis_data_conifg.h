@@ -26,6 +26,10 @@
 #define WHEEL_RADIUS 0.058f
 #define WHEEL_REDUCTION (268.0f/17.0f)
 #define WHEEL_ORIGINAL_REDUCTION (3591.0f / 187.0f)
+//驱动轮半轮距
+#define WHEEL_DIS (0.4386f/2.0f)
+
+
 // 原装减速器输出轴力矩常数，N·m/A。
 #define WHEEL_ORIGINAL_TORQUE_CONSTANT 0.3f
 #define WHEEL_MAX_CURRENT 20.0f
@@ -63,6 +67,22 @@
 #define LEG_SUPPORT_FADE_START (30.0f/180.0f*PI)
 #define LEG_SUPPORT_FADE_END (40.0f/180.0f*PI)
 
+#define SLIP_GATE (0.5)
+
+// 打滑检测初值，待实机标定；速度/增量单位 m/s，角速度单位 rad/s。
+#define SLIP_GATE_VEL_ENTER (1.2f)
+#define SLIP_GATE_VEL_RECOVER (0.6f)
+#define SLIP_GATE_YAW_ENTER (0.9f)
+#define SLIP_GATE_YAW_RECOVER (0.45f)
+#define SLIP_GATE_DELTA_ENTER (0.06f)
+#define SLIP_GATE_DELTA_RECOVER (0.03f)
+#define SLIP_MAX_YAW_RATE (3.0f)
+#define SLIP_MAX_BODY_ANGLE (15.0f / 180.0f * PI)
+#define SLIP_AVERAGE_SAMPLES (4u)
+#define SLIP_RECOVER_MS (200u)
+#define SLIP_WARMUP_MS (200u)
+#define SLIP_FEEDBACK_TIMEOUT_MS (10u)
+#define SLIP_MAX_INTERVAL_MS (5u)
 
 namespace chassis_config {
 // 传感器到机体，绕 Z 轴旋转 180°。

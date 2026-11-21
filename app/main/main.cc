@@ -59,7 +59,7 @@ extern "C" [[noreturn]] void app_entrance(void *args) {
         example_task, nullptr, "example_task", 512, os::task::Priority::HIGH
         ));
     BSP_ASSERT(os::task::static_create(
-            chassis_task, nullptr, "chassis_task", 1024, os::task::Priority::HIGH
+            chassis_task, nullptr, "chassis_task", 2048, os::task::Priority::HIGH
         ));
 
     for (;;) {

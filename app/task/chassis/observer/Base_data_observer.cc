@@ -33,6 +33,7 @@ Observer::joints joint_map(const motor::dm::feedback_t &feedback,
     Observer::joints result {};
     result.master_id = param.master_id;
     result.slave_id = param.slave_id;
+    result.timestamp = feedback.timestamp;
     if(feedback.timestamp == 0) return result;
     result.pos_ = joint_angle(dir * feedback.pos+ offset);
     result.vel_ = dir * feedback.vel;
@@ -79,6 +80,7 @@ void Observer::Base_data_observer::chassis_tick() {
 
 void Observer::Base_data_observer::wheel_process(const motor::dji::feedback_t &feedback, float dir,
                                                wheel_history &history, motors &result) {
+    result.timestamp = feedback.timestamp;
     if(feedback.timestamp == 0) return;
     if(history.sampled) {
         int delta = static_cast<int>(feedback.raw.angle) - history.last_angle;

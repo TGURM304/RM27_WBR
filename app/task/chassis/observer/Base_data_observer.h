@@ -18,6 +18,7 @@ struct comp_ptr {
 struct joints {
     float pos_, vel_, tor; // rad [-π, π)、rad/s、N·m
     uint8_t state, master_id, slave_id; // state 是 DM 错误码
+    uint32_t timestamp; // 最后反馈时间，ms；0 表示尚未收到反馈
 };
 
 struct motors {
@@ -25,6 +26,7 @@ struct motors {
     float total_angle; // 相对计零的有符号轮轴累计角，rad
     float angular_velocity, torque; // rad/s、N·m（电流估算）
     float distance, linear_velocity; // m、m/s，有符号
+    uint32_t timestamp; // 最后反馈时间，ms
 };
 
 struct body_posture {

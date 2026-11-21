@@ -60,6 +60,7 @@ namespace Controller
         float matrix_K[4][10] = {};
         output output_ = {};
         bool reference_ready = false;
+        bool position_enabled = false;
         bool enable_flag = false;
     };
 }
