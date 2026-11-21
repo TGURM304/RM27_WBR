@@ -62,7 +62,6 @@ namespace Coordinator
         left_leg_observer_(left_leg_observer), right_leg_observer_(right_leg_observer),
         base_data_observer_(base_data_observer), motors_(motors)
         {
-            remote = rc::dr16::data();
             kalman_vel_observer_.enable();
 
         };
@@ -73,12 +72,13 @@ namespace Coordinator
         void chassis_controller();//控制机器人运动，计算机器人运动电机所需力矩
         void chassis_actuator();//输出电机力矩
         [[nodiscard]] const chassis_output& get_output() const { return output_; }
+        [[nodiscard]] ctrl_enum get_state() const { return fsm_.ctrl; }
     //不同状态机的控制函数
     private:
-        void getup();//自动翻身+起立
+        void getup();//收腿到0.14m并将腿调整到机体系竖直
         void base_chassis_ctrl();//基础的底盘控制，腿长+移动
         void jump();//跳跃功能
-        void setp_up();//磕腿上台阶
+        void step_up();//磕腿上台阶
         void rest();//全部电机输出0，并且重新置零所有电机和观测器的积分累计内容
         void restart();//重新置位和重新reset所有电机，然后进行enable
     //成员变量
@@ -88,11 +88,12 @@ namespace Coordinator
         Leg_observer *left_leg_observer_, *right_leg_observer_;
         Base_data_observer *base_data_observer_;
         comp_ptr motors_;
-        enum class lqr_mode { rest, bench_control, full_control };
-        lqr_mode lqr_mode_ = lqr_mode::rest;
-        bool static_leg = false;
-        float target_vel_ = 0.0f, target_omega_ = 0.0f, target_leg_vel = 0.0f; // m/s、rad/s
-        float target_height_ = 0.18f; // m
+        bool state_entry_ = true, restart_pending_ = false;
+        bool remote_seen_ = false, last_enabled_ = false, start_request_ = false;
+        uint32_t normal_start_ms_ = 0;
+        float target_vel_ = 0.0f, target_omega_ = 0.0f; // m/s、rad/s
+        float target_leg_vel_ = 0.0f; // 高度变化速度，m/s
+        float target_height_ = NORMAL_INIT_HEIGHT; // m
         chassis_state lqr_state_{};
         leg_ctrl_data left_cmd_{}, right_cmd_{};
         chassis_output output_{};
@@ -120,7 +121,7 @@ namespace Coordinator
         base_data base_;
         chassis_data chassis_;
         ChassisVelObserver kalman_vel_observer_{};
-        const rc::dr16::data_t *remote;
+        rc::dr16::data_t remote_{};
     };
 }
 

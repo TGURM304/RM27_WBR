@@ -4,20 +4,20 @@
 
 #include "chassis_coor.h"
 #include "chassis_data_conifg.h"
+#include "bsp/time.h"
 #include <algorithm>
 #include <cmath>
-#include <numbers>
 
 using namespace Coordinator;
 
 namespace {
-constexpr float target_leg_rad = 0.5f * std::numbers::pi_v<float>;
+float wrap_angle(float angle) {
+    return atan2f(sinf(angle), cosf(angle));
+}
 
 float support_scale(float theta) {
-    // 相对竖直方向的偏角：30° 内为 1，30°～40° 以三次曲线降到 0。
-    constexpr float fade_start = std::numbers::pi_v<float> / 6.0f;
-    constexpr float fade_width = std::numbers::pi_v<float> / 18.0f;
-    const float t = std::clamp((fabsf(theta) - fade_start) / fade_width, 0.0f, 1.0f);
+    const float t = std::clamp((fabsf(theta) - LEG_SUPPORT_FADE_START) /
+                              (LEG_SUPPORT_FADE_END - LEG_SUPPORT_FADE_START), 0.0f, 1.0f);
     return (1.0f - t) * (1.0f - t) * (1.0f + 2.0f * t);
 }
 }
@@ -58,28 +58,61 @@ void chassis_coor::chassis_observer()
 
 void chassis_coor::chassis_command()
 {
-    static_leg = remote->s_l == 1;
-
-    if (static_leg && remote->s_r == 0) {
-        lqr_mode_ = lqr_mode::bench_control;
+    remote_ = rc::dr16::state();
+    target_vel_ = 2.0f * std::clamp(remote_.rc_l[1] / 800.0f, -1.0f, 1.0f);
+    target_omega_ = -5.0f * std::clamp(remote_.reserved / 660.0f, -1.0f, 1.0f);
+    target_leg_vel_ = 0.3f * std::clamp(remote_.rc_r[1] / 800.0f, -1.0f, 1.0f);
+    start_request_ = remote_seen_ && remote_.timestamp != 0 && remote_.s_l == 1 && !last_enabled_;
+    if (remote_.timestamp != 0) {
+        remote_seen_ = true;
+        last_enabled_ = remote_.s_l == 1;
     }
-    else if (static_leg && remote->s_r == 1)
-    {
-        lqr_mode_ = lqr_mode::full_control;
-    }
-    else
-    {
-        lqr_mode_ = lqr_mode::rest;
-    }
-
-    //遥感目标控制命令
-    target_vel_ = 2*std::clamp(remote->rc_l[1] / 800.0f, -1.0f, 1.0f);
-    target_omega_ = -5.0f * std::clamp(remote->reserved / 660.0f, -1.0f, 1.0f);
-    target_leg_vel = 0.3f*std::clamp(remote->rc_r[1] / 800.0f, -1.0f, 1.0f);
 }
 
-void chassis_coor::chassis_condition() {
-
+void chassis_coor::chassis_condition()
+{
+    const auto& b = base_.get_data();
+    const auto& c = chassis_.get_data();
+    const float left_angle = wrap_angle(c.left_leg_state.current_rad - STAND_LEG_RAD);
+    const float right_angle = wrap_angle(c.right_leg_state.current_rad - STAND_LEG_RAD);
+    const bool motors_safe = b.j1.state == 1 && b.j2.state == 1 && b.j3.state == 1 && b.j4.state == 1;
+    const bool posture_safe = fabsf(left_angle) <= BODY_LEG_DEG_SAFE && fabsf(right_angle) <= BODY_LEG_DEG_SAFE &&
+                              fabsf(b.body.body_theta) <= BODY_PITCH_SAFE;
+    auto next = fsm_.ctrl;
+    switch (fsm_.ctrl) {
+        case E_REST:
+            if (start_request_ && motors_safe) next = E_STAND;
+            break;
+        case E_STAND:
+        case E_NORMAL:
+            // LQR 接管后延迟启用倾角保护，电机状态始终检查。
+            if (!motors_safe || (fsm_.ctrl == E_NORMAL &&
+                static_cast<uint32_t>(bsp_time_get_ms() - normal_start_ms_) >= LQR_ANGLE_GUARD_DELAY_MS &&
+                !posture_safe)) {
+                next = E_ERROR;
+            } else if (remote_.s_l != 1) {
+                next = E_REST;
+            } else if (fsm_.ctrl == E_STAND) {
+                const bool ready =
+                    c.left_leg_state.current_len >= STAND_LEN_MIN && c.left_leg_state.current_len <= STAND_LEN_MAX &&
+                    c.right_leg_state.current_len >= STAND_LEN_MIN && c.right_leg_state.current_len <= STAND_LEN_MAX &&
+                    fabsf(left_angle) <= STAND_LEG_RAD_TOL && fabsf(right_angle) <= STAND_LEG_RAD_TOL;
+                if (ready) next = E_NORMAL;
+            }
+            break;
+        case E_STEP:
+        case E_JUMP:
+            if (remote_.s_l != 1) next = E_REST;
+            break;
+        case E_ERROR:
+            break;
+    }
+    if (next != fsm_.ctrl) {
+        fsm_.ctrl = next;
+        state_entry_ = true;
+        restart_pending_ = next == E_ERROR;
+        normal_start_ms_ = next == E_NORMAL ? bsp_time_get_ms() : 0;
+    }
 }
 
 void chassis_coor::chassis_scheduler()
@@ -89,33 +122,9 @@ void chassis_coor::chassis_scheduler()
     lqr_state_ = c.lqr_state;
     left_cmd_ = {};
     right_cmd_ = {};
+    output_ = {};
+    if (fsm_.ctrl != E_NORMAL) target_vel_ = target_omega_ = target_leg_vel_ = 0.0f;
 
-    //腿长控制计算
-    const bool leg_enabled = static_leg;
-    constexpr float dt = 1.0f / WHEEL_CHASSIS_HZ;
-    if (leg_enabled) {
-        target_height_ = std::clamp(target_height_ + target_leg_vel * dt, 0.14f, 0.33f);
-    } else {
-        target_height_ = 0.18f;
-    }
-    if (leg_enabled)
-    {
-        float left_theta = c.lqr_state.left_theta;
-        float right_theta = c.lqr_state.right_theta;
-        left_cmd_.target_len = fabsf(left_theta) < 30.0f/180.0f*PI ? (target_height_/cosf(left_theta))      : target_height_;
-        right_cmd_.target_len = fabsf(right_theta) < 30.0f/180.0f*PI ? (target_height_/cosf(right_theta))   : target_height_;
-    }
-    else
-    {
-        left_cmd_.target_len = c.left_leg_state.current_len;
-        right_cmd_.target_len = c.right_leg_state.current_len;
-    }
-    if (leg_enabled && lqr_mode_ != lqr_mode::full_control) {
-        const float left_error = target_leg_rad - c.left_leg_state.current_rad;
-        const float right_error = target_leg_rad - c.right_leg_state.current_rad;
-        left_cmd_.rad_error = atan2f(sinf(left_error), cosf(left_error));
-        right_cmd_.rad_error = atan2f(sinf(right_error), cosf(right_error));
-    }
     left_cmd_.current_len = c.left_leg_state.current_len;
     left_cmd_.current_speed = c.left_leg_state.current_speed;
     left_cmd_.current_rad = c.left_leg_state.current_rad;
@@ -128,58 +137,120 @@ void chassis_coor::chassis_scheduler()
     right_cmd_.current_omega = c.right_leg_state.current_omega;
     right_cmd_.small_rad = b.j1.pos_;
     right_cmd_.big_rad = b.j2.pos_;
+
+    switch (fsm_.ctrl) {
+        case E_STAND: getup(); break;
+        case E_NORMAL: base_chassis_ctrl(); break;
+        case E_STEP: step_up(); break;
+        case E_JUMP: jump(); break;
+        case E_REST:
+        case E_ERROR: rest(); break;
+    }
+    state_entry_ = false;
+}
+
+void chassis_coor::getup()
+{
+    left_cmd_.target_len = right_cmd_.target_len = STAND_LEG_LEN;
+    left_cmd_.rad_error = wrap_angle(STAND_LEG_RAD - left_cmd_.current_rad);
+    right_cmd_.rad_error = wrap_angle(STAND_LEG_RAD - right_cmd_.current_rad);
+}
+
+void chassis_coor::base_chassis_ctrl()
+{
+    if (state_entry_) {
+        target_height_ = NORMAL_INIT_HEIGHT;
+        left_leg_ctrl_->leg_clear();
+        right_leg_ctrl_->leg_clear();
+        if (lqr_ctrl_) lqr_ctrl_->lqr_set_zero(lqr_state_);
+    } else {
+        constexpr float dt = 1.0f / WHEEL_CHASSIS_HZ;
+        target_height_ = std::clamp(target_height_ + target_leg_vel_ * dt, STAND_LEG_LEN, NORMAL_HEIGHT_MAX);
+    }
+    left_cmd_.target_len = fabsf(lqr_state_.left_theta) < NORMAL_HEIGHT_COMP_ANGLE ?
+                           target_height_ / cosf(lqr_state_.left_theta) : target_height_;
+    right_cmd_.target_len = fabsf(lqr_state_.right_theta) < NORMAL_HEIGHT_COMP_ANGLE ?
+                            target_height_ / cosf(lqr_state_.right_theta) : target_height_;
+}
+
+void chassis_coor::rest()
+{
+    if (!state_entry_) return;
+    left_leg_ctrl_->leg_disable();
+    right_leg_ctrl_->leg_disable();
+    if (lqr_ctrl_) lqr_ctrl_->lqr_disable();
+    kalman_vel_observer_.clear();
+    base_data_observer_->reset_wheel_odometry();
+    left_leg_observer_->leg_clear();
+    if (right_leg_observer_ != left_leg_observer_) right_leg_observer_->leg_clear();
+    target_height_ = NORMAL_INIT_HEIGHT;
+}
+
+void chassis_coor::jump() {}
+void chassis_coor::step_up() {}
+
+void chassis_coor::restart()
+{
+    motor::dm *joints[] = {motors_.right_forward, motors_.right_back, motors_.left_back, motors_.left_forward};
+    for (auto *joint : joints) {
+        if (joint->state().err == 1) continue;
+        joint->reset();
+        joint->enable();
+    }
+    motor::dji *wheels[] = {motors_.left, motors_.right};
+    for (auto *wheel : wheels) {
+        if (wheel->enabled) continue;
+        wheel->clear();
+        wheel->enable();
+    }
 }
 
 void chassis_coor::chassis_controller()
 {
+    output_ = {};
+    const bool normal = fsm_.ctrl == E_NORMAL;
+    if (!normal && fsm_.ctrl != E_STAND) {
+        left_leg_ctrl_->leg_disable();
+        right_leg_ctrl_->leg_disable();
+        if (lqr_ctrl_) lqr_ctrl_->lqr_disable();
+        return;
+    }
     left_leg_ctrl_->leg_enable();
     right_leg_ctrl_->leg_enable();
-    const bool full_control = lqr_mode_ == lqr_mode::full_control;
-    output_.lqr = {};
-    if (lqr_ctrl_ && lqr_mode_ != lqr_mode::rest) {
-        lqr_ctrl_->lqr_enable(lqr_state_);
-        if (full_control) {
-            auto l = chassis_.get_data();
+    if (normal) {
+        if (lqr_ctrl_) {
+            lqr_ctrl_->lqr_enable(lqr_state_);
             lqr_ctrl_->lqr_clc_fitted(target_vel_, target_omega_, lqr_state_,
-                l.left_leg_state.current_len, l.right_leg_state.current_len);
-        } else {
-            lqr_ctrl_->lqr_clc_bench(target_vel_, target_omega_, lqr_state_, static_matrix_K);
+                                     left_cmd_.current_len, right_cmd_.current_len);
+            output_.lqr = lqr_ctrl_->get_output();
         }
-        output_.lqr = lqr_ctrl_->get_output();
+        constexpr float support_force_y = CAR_WEIGHT / 4.0f * 9.8f;
+        left_cmd_.forward_force_L = support_force_y * support_scale(lqr_state_.left_theta) * sinf(left_cmd_.current_rad);
+        right_cmd_.forward_force_L = support_force_y * support_scale(lqr_state_.right_theta) * sinf(right_cmd_.current_rad);
     } else if (lqr_ctrl_) {
         lqr_ctrl_->lqr_disable();
     }
-    constexpr float support_force_y = CAR_WEIGHT / 4.0f * 9.8f;
-    const float left_support_force = support_force_y * support_scale(lqr_state_.left_theta);
-    const float right_support_force = support_force_y * support_scale(lqr_state_.right_theta);
-    left_cmd_.forward_tor_M  = 0;
-    right_cmd_.forward_tor_M = 0;
-    left_cmd_.forward_force_L = full_control ? left_support_force * sinf(left_cmd_.current_rad) : 0.0f;
-    right_cmd_.forward_force_L = full_control ? right_support_force * sinf(right_cmd_.current_rad) : 0.0f;
-    left_cmd_.forward_y = full_control ? 0.0f : left_support_force;
-    right_cmd_.forward_y = full_control ? 0.0f : right_support_force;
-    left_cmd_.forward_x = 0;
-    right_cmd_.forward_x = 0;
-    left_leg_ctrl_->leg_ctrl_clc(left_cmd_, true, !full_control);
-    right_leg_ctrl_->leg_ctrl_clc(right_cmd_, true, !full_control);
+    left_leg_ctrl_->leg_ctrl_clc(left_cmd_, true, !normal);
+    right_leg_ctrl_->leg_ctrl_clc(right_cmd_, true, !normal);
     output_.left_leg = left_leg_ctrl_->get_output();
     output_.right_leg = right_leg_ctrl_->get_output();
 }
 
 void chassis_coor::chassis_actuator()
 {
-    const bool full_control = lqr_mode_ == lqr_mode::full_control;
+    const bool normal = fsm_.ctrl == E_NORMAL;
+    const bool active = normal || fsm_.ctrl == E_STAND;
     float j1 = 0, j2 = 0, j3 = 0, j4 = 0;
-    if (static_leg) {
+    if (active) {
         j1 = output_.right_leg.len_ctrl_small + output_.right_leg.rad_ctrl_small
             + output_.right_leg.forward_cod_small + output_.right_leg.forward_poly_small;
         j2 = output_.right_leg.len_ctrl_big + output_.right_leg.rad_ctrl_big
             + output_.right_leg.forward_cod_big + output_.right_leg.forward_poly_big;
-        j3 = output_.left_leg.len_ctrl_big + output_.left_leg.rad_ctrl_big +
-            output_.left_leg.forward_cod_big + output_.left_leg.forward_poly_big;
-        j4 = output_.left_leg.len_ctrl_small + output_.left_leg.rad_ctrl_small +
-            output_.left_leg.forward_cod_small + output_.left_leg.forward_poly_small;
-        if (lqr_ctrl_ && full_control) {
+        j3 = output_.left_leg.len_ctrl_big + output_.left_leg.rad_ctrl_big
+            + output_.left_leg.forward_cod_big + output_.left_leg.forward_poly_big;
+        j4 = output_.left_leg.len_ctrl_small + output_.left_leg.rad_ctrl_small
+            + output_.left_leg.forward_cod_small + output_.left_leg.forward_poly_small;
+        if (normal && lqr_ctrl_) {
             const auto [left_small, left_big] = vmc_pol_clc(
                 left_cmd_.small_rad, left_cmd_.big_rad, output_.lqr.T_b_l, 0.0f);
             const auto [right_small, right_big] = vmc_pol_clc(
@@ -190,16 +261,21 @@ void chassis_coor::chassis_actuator()
             j4 += left_small;
         }
     }
-    if (remote->s_l == 1)
-    {
-        motors_.right_forward->control(0, 0, 0, 0, j1 * J1_dir);
-        motors_.right_back->control(0, 0, 0, 0, j2 * J2_dir);
-        motors_.left_back->control(0, 0, 0, 0, j3 * J3_dir);
-        motors_.left_forward->control(0, 0, 0, 0, j4 * J4_dir);
-        // motors_.right_forward->control(0, 0, 0, 0, 0);
-        // motors_.right_back->control(0, 0, 0, 0, 0);
-        // motors_.left_back->control(0, 0, 0, 0, 0);
-        // motors_.left_forward->control(0, 0, 0, 0, 0);
+    motors_.right_forward->control(0, 0, 0, 0, j1 * J1_dir);
+    motors_.right_back->control(0, 0, 0, 0, j2 * J2_dir);
+    motors_.left_back->control(0, 0, 0, 0, j3 * J3_dir);
+    motors_.left_forward->control(0, 0, 0, 0, j4 * J4_dir);
+    // 轮轴 N·m 转原始电流指令，轮端只在 NORMAL 输出。
+    constexpr float rotor_kt = WHEEL_ORIGINAL_TORQUE_CONSTANT / WHEEL_ORIGINAL_REDUCTION;
+    constexpr float torque_to_current = WHEEL_MAX_RAW_CURRENT / (WHEEL_MAX_CURRENT * rotor_kt * WHEEL_REDUCTION);
+    motors_.left->update(normal ? output_.lqr.T_w_l * LEFT_MOTOR_DIR * torque_to_current : 0.0f);
+    motors_.right->update(normal ? output_.lqr.T_w_r * RIGHT_MOTOR_DIR * torque_to_current : 0.0f);
+    if (restart_pending_) {
+        restart();
+        restart_pending_ = false;
+    }
+
+    if (active) {
         const auto& c = chassis_.get_data();
         const auto& b = base_.get_data();
         constexpr float sigma_Q = 0.2f, sigma_R_vel = 0.2f, sigma_R_acc = 0.6f;
@@ -207,40 +283,7 @@ void chassis_coor::chassis_actuator()
                                                           sigma_Q, sigma_R_vel, sigma_R_acc);
         const float kalman_vel = kalman_vel_observer_.get_kalman_output(false);
         bsp_uart_printf(E_UART_1,"%f,%f,%f,%f,%f,%f\r\n",
-                (float)b.j1.state,
-                (float)b.j2.state,
-                (float)b.j3.state,
-                c.lqr_state.dot_x,
-                body_vel,
-                kalman_vel
-                );
-        if (lqr_ctrl_ && lqr_mode_ != lqr_mode::rest) {
-            // 按原装力矩常数和当前减速比，将轮轴 N·m 换算为原始电流指令。
-            constexpr float rotor_kt = WHEEL_ORIGINAL_TORQUE_CONSTANT / WHEEL_ORIGINAL_REDUCTION;
-            constexpr float torque_to_current = WHEEL_MAX_RAW_CURRENT / (WHEEL_MAX_CURRENT * rotor_kt * WHEEL_REDUCTION);
-            motors_.left->update((output_.lqr.T_w_l) * LEFT_MOTOR_DIR * torque_to_current);
-            motors_.right->update((output_.lqr.T_w_r) * RIGHT_MOTOR_DIR * torque_to_current);
-            // motors_.left->update(0);
-            // motors_.right->update(0);
-        } else {
-            motors_.left->update(0);
-            motors_.right->update(0);
-        }
+                        (float)b.j1.state, (float)b.j2.state, (float)b.j3.state,
+                        c.lqr_state.dot_x, body_vel, kalman_vel);
     }
-    else
-    {
-        kalman_vel_observer_.clear();
-        motors_.right_forward->control(0, 0, 0, 0, 0);
-        motors_.right_back->control(0, 0, 0, 0, 0);
-        motors_.left_back->control(0, 0, 0, 0, 0);
-        motors_.left_forward->control(0, 0, 0, 0, 0);
-        motors_.left->update(0);
-        motors_.right->update(0);
-    }
-}
-
-//这个函数是不受到外部控制命令影响的
-void chassis_coor::getup()
-{
-
 }

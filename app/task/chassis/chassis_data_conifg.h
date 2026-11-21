@@ -47,6 +47,23 @@
 #define LEG_LEN_MAX (0.32f)
 #define LEG_LEN_MIN (0.15f)
 
+//机器人的保护和状态机相关宏定义
+#define BODY_PITCH_SAFE (45.0f/180.0f*PI)
+#define BODY_LEG_DEG_SAFE (45.0f/180.0f*PI)
+#define STAND_LEG_LEN (0.14f)
+#define NORMAL_INIT_HEIGHT (0.18f)
+#define STAND_LEG_RAD (PI / 2.0f)
+#define STAND_LEN_MIN (0.125f)
+#define STAND_LEN_MAX (0.145f)
+#define STAND_LEG_RAD_TOL (15.0f/180.0f*PI)
+
+#define LQR_ANGLE_GUARD_DELAY_MS (500u)
+#define NORMAL_HEIGHT_MAX (0.33f)
+#define NORMAL_HEIGHT_COMP_ANGLE (30.0f/180.0f*PI)
+#define LEG_SUPPORT_FADE_START (30.0f/180.0f*PI)
+#define LEG_SUPPORT_FADE_END (40.0f/180.0f*PI)
+
+
 namespace chassis_config {
 // 传感器到机体，绕 Z 轴旋转 180°。
 inline constexpr float imu_sensor_to_body[9] = {
