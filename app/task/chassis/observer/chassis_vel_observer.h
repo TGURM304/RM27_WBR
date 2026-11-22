@@ -6,10 +6,7 @@
 #define TROBOT_CHASSIS_VEL_OBSERVER_H
 
 #include "Base_data_observer.h"
-namespace Coordinator
-{
-    struct leg_state;
-}
+#include "leg_data_observer.h"
 
 namespace Observer
 {
@@ -29,16 +26,19 @@ namespace Observer
         void disable();
         void clear();
         // 返回本轮未滤波的机体前向速度（m/s），供串口比较。
-        // 标准差单位依次为 m/s³、m/s、m/s²。两路测量标准差均为 +∞ 时仅预测。
-        float update(const Coordinator::leg_state& left_leg, const Coordinator::leg_state& right_leg,
-                     const chassis_basedata& chassis, float sigma_Q, float sigma_R_vel, float sigma_R_acc);
+        // 指针必须有效；调用方先更新基础及腿部观察器，本函数只读取已有结果。
+        // Q/R 直接取配置中的协方差；slip_confidence 为 [0,1]。
+        // 超过配置门限且 |gyro yaw|<3 rad/s 时使用打滑参数，切换保留滤波历史。
+        float update(Base_data_observer *base_observer, Leg_observer *left_observer,
+                     Leg_observer *right_observer, float slip_confidence = 0.0f);
         // 水平前向速度，m/s。默认加上轮轴相对机体的运动分量。
         [[nodiscard]] float get_kalman_output(bool include_wheel_motion = true) const {
             return include_wheel_motion ? kalman_vel + wheel_relative_vel_ : kalman_vel;
         }
         [[nodiscard]] velocity_diagnostics get_diagnostics() const { return diagnostics_; }
     private:
-        bool chassis_kalman(float body_vel, float acc_x, float sigma_Q, float sigma_R_vel, float sigma_R_acc);
+        // q_* 为每拍过程噪声方差，r_* 为测量噪声方差，Q/R 交叉项为零。
+        bool chassis_kalman(float acc_x, float body_vel, double q_vv, double q_aa, double r_vv, double r_aa);
         float kalman_vel = 0.0f, kalman_acc = 0.0f;
         float wheel_relative_vel_ = 0.0f;
         double p_vv_ = 0.0, p_va_ = 0.0, p_aa_ = 0.0;

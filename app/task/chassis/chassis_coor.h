@@ -43,7 +43,8 @@ namespace Coordinator
         float left_residual, right_residual; // B：轮速幅值减 KF 预测速度幅值，m/s
         float yaw_residual; // 有符号偏航失配，rad/s；yaw_slip 只记录 A 超限
         float left_delta_residual, right_delta_residual; // C：平均轮速增量幅值减平均 IMU 增量幅值，m/s
-        float left_norm, right_norm, slip_norm; // 证据强度 [0,1]，不是概率
+        float left_norm, right_norm; // 本拍左右证据强度 [0,1]
+        float slip_norm; // 统一累计的整车置信度 [0,1]
         float reference_velocity, dt; // KF 更新前预测（m/s）、实际间隔（s）；inertial_reference 恒为 false
     };
     typedef enum
@@ -115,6 +116,8 @@ namespace Coordinator
         struct slip_history {
             uint64_t start_us = 0, last_us = 0;
             uint64_t recover_us[2]{};
+            unsigned norm_quiet_ticks = 0, norm_decay_ticks = 0;
+            float norm_decay_start = 0.0f;
             float last_left_velocity = 0.0f, last_right_velocity = 0.0f;
             filter::moving_average_filter<SLIP_AVERAGE_SAMPLES> left_delta_filter{}, right_delta_filter{}, imu_delta_filter{};
             bool tracking = false;

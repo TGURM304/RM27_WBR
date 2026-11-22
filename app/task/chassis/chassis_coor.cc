@@ -54,9 +54,8 @@ void chassis_coor::chassis_observer()
     next.left_leg_state = {left.leg_phi, left.leg_phi_dot, left.leg_len, left.leg_len_dot};
     next.right_leg_state = {right.leg_phi, right.leg_phi_dot, right.leg_len, right.leg_len_dot};
     if (fsm_.ctrl == E_STAND || fsm_.ctrl == E_NORMAL) {
-        constexpr float sigma_Q = 0.2f, sigma_R_vel = 0.2f, sigma_R_acc = 0.6f;
-        kalman_vel_observer_.update(next.left_leg_state, next.right_leg_state, b,
-                                    sigma_Q, sigma_R_vel, sigma_R_acc);
+        const float slip_confidence = fsm_.ctrl == E_NORMAL && slip_.valid ? fsm_.slip_norm : 0.0f;
+        kalman_vel_observer_.update(base_data_observer_, left_leg_observer_, right_leg_observer_, slip_confidence);
         next.kalman_vel = kalman_vel_observer_.get_kalman_output(false);
     }
     chassis_.update_data(next);
@@ -311,7 +310,22 @@ void chassis_coor::slip_clc()
         strength(slip_.left_delta_residual, SLIP_GATE_DELTA_RECOVER, SLIP_GATE_DELTA_ENTER));
     slip_.right_norm = std::min(gate_strength,
         strength(slip_.right_delta_residual, SLIP_GATE_DELTA_RECOVER, SLIP_GATE_DELTA_ENTER));
-    slip_.slip_norm = std::max(slip_.left_norm, slip_.right_norm);
+    const bool hit = gate && (slip_.left_delta_residual >= SLIP_GATE_DELTA_ENTER
+                          || slip_.right_delta_residual >= SLIP_GATE_DELTA_ENTER);
+    if (hit) {
+        slip_.slip_norm = std::min(1.0f, slip_.slip_norm + SLIP_NORM_RISE_STEP);
+        h.norm_quiet_ticks = h.norm_decay_ticks = 0;
+        h.norm_decay_start = 0.0f;
+    } else if (h.norm_quiet_ticks < SLIP_NORM_HOLD_TICKS) {
+        ++h.norm_quiet_ticks;
+    } else if (h.norm_decay_ticks < SLIP_NORM_DECAY_TICKS) {
+        if (h.norm_decay_ticks == 0) h.norm_decay_start = slip_.slip_norm;
+        ++h.norm_decay_ticks;
+        const double t = h.norm_decay_ticks * 0.001;
+        constexpr double duration = SLIP_NORM_DECAY_SECONDS;
+        // n=n0-t²/T²，即 dn/dt=-(2/T²)*t；T 由配置指定。
+        slip_.slip_norm = static_cast<float>(std::max(0.0, h.norm_decay_start - t * t / (duration * duration)));
+    }
     slip_.valid = true;
     fsm_.slip_norm = slip_.slip_norm;
 }
@@ -386,7 +400,6 @@ void chassis_coor::chassis_actuator()
         restart_pending_ = false;
     }
 
-    if (active) {
-        bsp_uart_printf(E_UART_1,"%f\r\n",fsm_.slip_norm);
-    }
+    const auto& c = chassis_.get_data();
+    bsp_uart_printf(E_UART_1,"%f,%f,%f\r\n",c.kalman_vel,c.lqr_state.dot_x,fsm_.ctrl == E_NORMAL && slip_.valid ? fsm_.slip_norm : 0.0f);
 }

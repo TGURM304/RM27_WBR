@@ -9,38 +9,36 @@
 #include <cmath>
 #include <limits>
 
-#include "chassis_coor.h"
-
 namespace
 {
-float wheel_mount_rate(const Coordinator::leg_state& leg, const Observer::joints& big_joint)
+float wheel_mount_rate(const Observer::leg_data& leg, const Observer::joints& big_joint)
 {
-    const float sin_phi = std::sin(leg.current_rad);
-    const float cos_phi = std::cos(leg.current_rad);
+    const float sin_phi = std::sin(leg.leg_phi);
+    const float cos_phi = std::cos(leg.leg_phi);
     const float ag_x = LEG_LEN_AG * std::cos(big_joint.pos_);
     const float ag_y = LEG_LEN_AG * std::sin(big_joint.pos_);
-    const float gw_x = leg.current_len * cos_phi - ag_x;
-    const float gw_y = leg.current_len * sin_phi - ag_y;
+    const float gw_x = leg.leg_len * cos_phi - ag_x;
+    const float gw_y = leg.leg_len * sin_phi - ag_y;
 
     // GW = AW − AG，角速度为 (GW × dGW/dt) / |GW|²。
-    const float tangent_speed = leg.current_len * leg.current_omega;
-    const float gw_vx = leg.current_speed * cos_phi - tangent_speed * sin_phi + ag_y * big_joint.vel_;
-    const float gw_vy = leg.current_speed * sin_phi + tangent_speed * cos_phi - ag_x * big_joint.vel_;
+    const float tangent_speed = leg.leg_len * leg.leg_phi_dot;
+    const float gw_vx = leg.leg_len_dot * cos_phi - tangent_speed * sin_phi + ag_y * big_joint.vel_;
+    const float gw_vy = leg.leg_len_dot * sin_phi + tangent_speed * cos_phi - ag_x * big_joint.vel_;
     return (gw_x * gw_vy - gw_y * gw_vx) / (LEG_LEN_GW * LEG_LEN_GW);
 }
 
-float wheel_relative_velocity(const Coordinator::leg_state& leg, const Observer::body_posture& posture,
+float wheel_relative_velocity(const Observer::leg_data& leg, const Observer::body_posture& posture,
                               const math::matrix<3, 3>& body_to_level)
 {
-    const float cos_phi = std::cos(leg.current_rad), sin_phi = std::sin(leg.current_rad);
-    const float x = leg.current_len * cos_phi, z = -leg.current_len * sin_phi;
-    const float tangent_speed = leg.current_len * leg.current_omega;
+    const float cos_phi = std::cos(leg.leg_phi), sin_phi = std::sin(leg.leg_phi);
+    const float x = leg.leg_len * cos_phi, z = -leg.leg_len * sin_phi;
+    const float tangent_speed = leg.leg_len * leg.leg_phi_dot;
 
     // 机体 X 向前、Z 向上。左右安装点的横向偏置在轮轴中心平均时相消。
     const math::matrix<3, 1> relative_velocity{
-        leg.current_speed * cos_phi - tangent_speed * sin_phi + posture.body_gyro_pitch * z,
+        leg.leg_len_dot * cos_phi - tangent_speed * sin_phi + posture.body_gyro_pitch * z,
         posture.body_gyro_yaw * x - posture.body_gyro_roll * z,
-        -leg.current_speed * sin_phi - tangent_speed * cos_phi - posture.body_gyro_pitch * x
+        -leg.leg_len_dot * sin_phi - tangent_speed * cos_phi - posture.body_gyro_pitch * x
     };
     return (body_to_level * relative_velocity)[0];
 }
@@ -69,14 +67,29 @@ void ChassisVelObserver::clear()
     diagnostics_ = {};
 }
 
-float ChassisVelObserver::update(const Coordinator::leg_state& left_leg, const Coordinator::leg_state& right_leg,
-                                 const chassis_basedata& chassis, float sigma_Q, float sigma_R_vel, float sigma_R_acc)
+float ChassisVelObserver::update(Base_data_observer *base_observer, Leg_observer *left_observer,
+                                 Leg_observer *right_observer, float slip_confidence)
 {
     diagnostics_ = {};
     if (!enabled_) return 0.0f;
+    const auto chassis = base_observer->get_chassis_data();
+    const auto left_leg = left_observer->get_leg_data().first;
+    const auto right_leg = right_observer->get_leg_data().second;
     const auto& posture = chassis.body;
+    const bool slip_adapted = slip_confidence > SLIP_KF_CONFIDENCE_GATE;
+    const double q_vv = slip_adapted ? SLIP_KF_Q_VEL : CHASSIS_KF_Q_VEL;
+    const double q_aa = slip_adapted ? SLIP_KF_Q_ACC : CHASSIS_KF_Q_ACC;
+    const double r_vv = slip_adapted ? SLIP_KF_R_VEL : CHASSIS_KF_R_VEL;
+    const double r_aa = slip_adapted ? SLIP_KF_R_ACC : CHASSIS_KF_R_ACC;
+
+    //测试用代码
+    // const double q_vv = 1.0f/1000.0f;
+    // const double q_aa = 10.0f/1000.0f;
+    // const double r_vv = 0.1*100000;
+    // const double r_aa = 0.1f;
 
     // 水平坐标系随航向转动，X 轴沿机头的水平投影。
+
     const auto body_to_level = math::matrix<3, 3>::rot_euler(
         posture.body_roll, posture.body_theta, 0.0f);
     const math::matrix<3, 1> body_acc{posture.body_x_acc, posture.body_y_acc, posture.body_z_acc};
@@ -99,7 +112,7 @@ float ChassisVelObserver::update(const Coordinator::leg_state& left_leg, const C
                     body_vel, acc_x, yaw_rate,
                     static_cast<float>(kalman_vel + (1.0 / WHEEL_CHASSIS_HZ) * kalman_acc), false};
     const bool had_prediction = kalman_initialized_;
-    if (chassis_kalman(body_vel, acc_x, sigma_Q, sigma_R_vel, sigma_R_acc) && std::isfinite(relative_vel)) {
+    if (chassis_kalman(acc_x, body_vel, q_vv, q_aa, r_vv, r_aa) && std::isfinite(relative_vel)) {
         wheel_relative_vel_ = relative_vel;
         diagnostics_.valid = had_prediction && std::isfinite(diagnostics_.left_velocity)
                           && std::isfinite(diagnostics_.right_velocity) && std::isfinite(body_vel)
@@ -109,49 +122,29 @@ float ChassisVelObserver::update(const Coordinator::leg_state& left_leg, const C
     return body_vel;
 }
 
-bool ChassisVelObserver::chassis_kalman(float body_vel, float acc_x,
-                                        float sigma_Q, float sigma_R_vel, float sigma_R_acc)
+bool ChassisVelObserver::chassis_kalman(float acc_x, float body_vel,
+                                      double q_vv, double q_aa, double r_vv, double r_aa)
 {
-    constexpr float inf = std::numeric_limits<float>::infinity();
-    const bool predict_only = sigma_R_vel == inf && sigma_R_acc == inf;
-    if (!std::isfinite(sigma_Q) || sigma_Q < 0.0f) return false;
-    if (!predict_only && (!std::isfinite(sigma_R_vel) || !std::isfinite(sigma_R_acc) ||
-                          sigma_R_vel <= 0.0f || sigma_R_acc <= 0.0f)) return false;
-    if ((!kalman_initialized_ || !predict_only) &&
-        (!std::isfinite(body_vel) || !std::isfinite(acc_x))) return false;
+    if (!std::isfinite(body_vel) || !std::isfinite(acc_x)) return false;
 
     if (!kalman_initialized_) {
         kalman_vel = body_vel;
         kalman_acc = acc_x;
-        p_vv_ = predict_only ? 0.0 : static_cast<double>(sigma_R_vel) * sigma_R_vel;
+        p_vv_ = 1.0;
         p_va_ = 0.0;
-        p_aa_ = predict_only ? 0.0 : static_cast<double>(sigma_R_acc) * sigma_R_acc;
+        p_aa_ = 1.0; // 初始 P=I，与参考工程一致。
         kalman_initialized_ = true;
         return true;
     }
 
     constexpr double dt = 1.0 / WHEEL_CHASSIS_HZ;
-    const double q_a = sigma_Q * dt;
-    const double q_v = 0.5 * dt * q_a;
     const double v_pred = kalman_vel + dt * kalman_acc;
     const double a_pred = kalman_acc;
-    const double p_vv = p_vv_ + dt * (2.0 * p_va_ + dt * p_aa_) + q_v * q_v;
-    const double p_va = p_va_ + dt * p_aa_ + q_v * q_a;
-    const double p_aa = p_aa_ + q_a * q_a;
+    const double p_vv = p_vv_ + dt * (2.0 * p_va_ + dt * p_aa_) + q_vv;
+    const double p_va = p_va_ + dt * p_aa_;
+    const double p_aa = p_aa_ + q_aa;
 
     constexpr double max_output = std::numeric_limits<float>::max();
-    if (predict_only) {
-        if (!std::isfinite(v_pred) || std::abs(v_pred) > max_output ||
-            !std::isfinite(p_vv) || !std::isfinite(p_va) || !std::isfinite(p_aa)) return false;
-        kalman_vel = static_cast<float>(v_pred);
-        p_vv_ = p_vv;
-        p_va_ = p_va;
-        p_aa_ = p_aa;
-        return true;
-    }
-
-    const double r_vv = static_cast<double>(sigma_R_vel) * sigma_R_vel;
-    const double r_aa = static_cast<double>(sigma_R_acc) * sigma_R_acc;
     const double s_vv = p_vv + r_vv;
     const double s_aa = p_aa + r_aa;
     const double det_p = p_vv * p_aa - p_va * p_va;
