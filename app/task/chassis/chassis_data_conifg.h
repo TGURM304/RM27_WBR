@@ -62,6 +62,7 @@
 #define STAND_LEG_RAD_TOL (15.0f/180.0f*PI)
 
 #define LQR_ANGLE_GUARD_DELAY_MS (500u)
+#define LQR_KALMAN_VEL_DELAY_MS (3000u) // E_NORMAL 进入后，允许切换 KF 速度的等待时间
 #define NORMAL_HEIGHT_MAX (0.33f)
 #define NORMAL_HEIGHT_COMP_ANGLE (30.0f/180.0f*PI)
 #define LEG_SUPPORT_FADE_START (30.0f/180.0f*PI)
@@ -70,17 +71,21 @@
 #define SLIP_GATE (0.5)
 
 // 打滑检测初值，待实机标定；速度/增量单位 m/s，角速度单位 rad/s。
-#define SLIP_GATE_VEL_ENTER (0.4f)
-#define SLIP_GATE_VEL_RECOVER (0.25f) // 左右锁存标志解除的速度失配上限，m/s
+#define SLIP_GATE_VEL_ENTER (0.6f)
+#define SLIP_GATE_VEL_RECOVER (0.4f) // 左右锁存标志解除的速度失配上限，m/s
 #define SLIP_GATE_YAW_ENTER (0.3f)
 #define SLIP_GATE_YAW_RECOVER (0.2f) // 左右锁存标志解除的偏航失配上限，rad/s
-#define SLIP_GATE_DELTA_ENTER (0.06f)
-#define SLIP_GATE_DELTA_RECOVER (0.03f) // 本拍 C 诊断强度的零点，m/s，不参与整车保持计数
+#define SLIP_GATE_DELTA_ENTER (10.0f)
+#define SLIP_GATE_DELTA_RECOVER (5.0f) // 本拍 C 诊断强度的零点，m/s，不参与整车保持计数
 #define SLIP_MAX_YAW_RATE (3.0f)
 #define SLIP_MAX_BODY_ANGLE (15.0f / 180.0f * PI)
 #define SLIP_AVERAGE_SAMPLES (4u)
+#define SLIP_LEFT_ACCEL_CUTOFF_HZ (5.0f)
+#define SLIP_LEFT_ACCEL_AVERAGE_SAMPLES (5u)
 // 固定 1 kHz；置信度衰减系数 k=2/T²，由下面的衰减时长自动推导。
 #define SLIP_NORM_RISE_STEP (0.1f)
+#define SLIP_NORM_ONE_CONDITION_SCALE (1.0f / 4.0f)
+#define SLIP_NORM_TWO_CONDITION_SCALE (3.0f / 5.0f)
 #define SLIP_NORM_HOLD_TICKS (50u) // 两侧均未命中后保持置信度的拍数，1拍=1ms
 #define SLIP_NORM_DECAY_TICKS (50u) // 开始衰减后，从满值1归零的拍数；较小初值更早归零
 #define SLIP_NORM_DECAY_SECONDS (SLIP_NORM_DECAY_TICKS * 0.001)
@@ -93,8 +98,8 @@
 #define SLIP_KF_CONFIDENCE_GATE (0.5f)
 #define CHASSIS_KF_Q_VEL (0.2f)
 #define CHASSIS_KF_Q_ACC (100.0f)
-#define CHASSIS_KF_R_VEL (1.0f)
-#define CHASSIS_KF_R_ACC (0.5f)
+#define CHASSIS_KF_R_VEL (3.0f)
+#define CHASSIS_KF_R_ACC (1.0f)
 #define SLIP_KF_Q_VEL (CHASSIS_KF_Q_VEL/1000)
 #define SLIP_KF_Q_ACC (CHASSIS_KF_Q_ACC/1000)
 #define SLIP_KF_R_VEL (CHASSIS_KF_R_VEL*10000)

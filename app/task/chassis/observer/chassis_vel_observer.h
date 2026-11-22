@@ -25,6 +25,9 @@ namespace Observer
         void enable();
         void disable();
         void clear();
+        // 直接解算机体前向速度（m/s），补偿腿部运动，不更新 KF。
+        float chassis_move_clc(Base_data_observer *base_observer, Leg_observer *left_observer,
+                               Leg_observer *right_observer);
         // 返回本轮未滤波的机体前向速度（m/s），供串口比较。
         // 指针必须有效；调用方先更新基础及腿部观察器，本函数只读取已有结果。
         // Q/R 直接取配置中的协方差；slip_confidence 为 [0,1]。

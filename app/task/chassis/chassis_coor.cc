@@ -10,6 +10,9 @@
 
 using namespace Coordinator;
 
+float temp_delt_vel_ = 0.0f;
+float temp_acc_ = 0.0f;
+
 namespace {
 float wrap_angle(float angle) {
     return atan2f(sinf(angle), cosf(angle));
@@ -40,7 +43,6 @@ void chassis_coor::chassis_observer()
     //腿控制和LQR控制所需要用到的状态均存在chassis_变量中
     //更新LQR状态
     next.lqr_state.x = (b.motor_left.total_angle+b.motor_right.total_angle)*WHEEL_RADIUS/2;
-    next.lqr_state.dot_x = 0.5f * (b.motor_left.linear_velocity + b.motor_right.linear_velocity);
     next.lqr_state.theta = b.body.body_theta;
     next.lqr_state.dot_theta = b.body.body_gyro_pitch;
     next.lqr_state.left_theta = left.leg_phi-PI/2;
@@ -54,12 +56,10 @@ void chassis_coor::chassis_observer()
     next.left_leg_state = {left.leg_phi, left.leg_phi_dot, left.leg_len, left.leg_len_dot};
     next.right_leg_state = {right.leg_phi, right.leg_phi_dot, right.leg_len, right.leg_len_dot};
     if (fsm_.ctrl == E_STAND || fsm_.ctrl == E_NORMAL) {
-        const float slip_confidence = fsm_.ctrl == E_NORMAL && slip_.valid ? fsm_.slip_norm : 0.0f;
-        kalman_vel_observer_.update(base_data_observer_, left_leg_observer_, right_leg_observer_, slip_confidence);
-        next.kalman_vel = kalman_vel_observer_.get_kalman_output(false);
+        next.lqr_state.dot_x = kalman_vel_observer_.chassis_move_clc(
+            base_data_observer_, left_leg_observer_, right_leg_observer_);
     }
     chassis_.update_data(next);
-    slip_clc();
 }
 
 
@@ -186,7 +186,6 @@ void chassis_coor::rest()
     left_leg_ctrl_->leg_disable();
     right_leg_ctrl_->leg_disable();
     if (lqr_ctrl_) lqr_ctrl_->lqr_disable();
-    kalman_vel_observer_.clear();
     slip_history_ = {};
     slip_ = {};
     fsm_.slip_norm = 0.0f;
@@ -247,19 +246,22 @@ void chassis_coor::slip_clc()
 
     const float left_velocity = d.left_velocity + WHEEL_DIS * d.yaw_rate;
     const float right_velocity = d.right_velocity - WHEEL_DIS * d.yaw_rate;
+    const float left_wheel_velocity = b.motor_left.linear_velocity;
     if (!h.tracking) {
         h.tracking = true;
         h.start_us = h.last_us = now;
-        h.last_left_velocity = left_velocity;
+        h.last_left_wheel_velocity = left_wheel_velocity;
         h.last_right_velocity = right_velocity;
         return;
     }
-    const float dt = static_cast<float>(now - h.last_us) * 1e-6f;
-    const float left_delta = h.left_delta_filter.update(left_velocity - h.last_left_velocity);
-    const float right_delta = h.right_delta_filter.update(right_velocity - h.last_right_velocity);
-    const float imu_delta = h.imu_delta_filter.update(d.acc_x * dt);
+    constexpr float dt = 1.0f / 1000.0f;
+    const float left_acc = (left_wheel_velocity - h.last_left_wheel_velocity) / dt;
+    const float left_acc_mean = h.left_acc_average.update(left_acc);
+    const float left_delta = h.left_acc_filter.update(left_acc_mean);
+    const float right_delta = h.right_delta_filter.update(right_velocity - h.last_right_velocity)/dt;
+    const float imu_delta = h.imu_delta_filter.update(d.acc_x);
     h.last_us = now;
-    h.last_left_velocity = left_velocity;
+    h.last_left_wheel_velocity = left_wheel_velocity;
     h.last_right_velocity = right_velocity;
 
     slip_.left_velocity = left_velocity;
@@ -272,6 +274,8 @@ void chassis_coor::slip_clc()
     slip_.yaw_residual = (d.right_velocity - d.left_velocity) / (2.0f * WHEEL_DIS) - d.yaw_rate;
     slip_.left_delta_residual = fabsf(left_delta) - fabsf(imu_delta);
     slip_.right_delta_residual = fabsf(right_delta) - fabsf(imu_delta);
+    temp_delt_vel_ = left_delta;
+    temp_acc_ = imu_delta;
     if (!std::isfinite(slip_.left_residual) || !std::isfinite(slip_.right_residual)
         || !std::isfinite(slip_.left_delta_residual) || !std::isfinite(slip_.right_delta_residual)
         || !std::isfinite(slip_.yaw_residual)) {
@@ -310,10 +314,14 @@ void chassis_coor::slip_clc()
         strength(slip_.left_delta_residual, SLIP_GATE_DELTA_RECOVER, SLIP_GATE_DELTA_ENTER));
     slip_.right_norm = std::min(gate_strength,
         strength(slip_.right_delta_residual, SLIP_GATE_DELTA_RECOVER, SLIP_GATE_DELTA_ENTER));
-    const bool hit = gate && (slip_.left_delta_residual >= SLIP_GATE_DELTA_ENTER
-                          || slip_.right_delta_residual >= SLIP_GATE_DELTA_ENTER);
-    if (hit) {
-        slip_.slip_norm = std::min(1.0f, slip_.slip_norm + SLIP_NORM_RISE_STEP);
+    const bool velocity_hit = slip_.left_residual >= SLIP_GATE_VEL_ENTER
+                           || slip_.right_residual >= SLIP_GATE_VEL_ENTER;
+    const bool acceleration_hit = slip_.left_delta_residual >= SLIP_GATE_DELTA_ENTER
+                               || slip_.right_delta_residual >= SLIP_GATE_DELTA_ENTER;
+    const unsigned hit_count = static_cast<unsigned>(slip_.yaw_slip) + velocity_hit + acceleration_hit;
+    constexpr float rise_scale[4] = {0.0f, SLIP_NORM_ONE_CONDITION_SCALE, SLIP_NORM_TWO_CONDITION_SCALE, 1.0f};
+    if (hit_count != 0) {
+        slip_.slip_norm = std::min(1.0f, slip_.slip_norm + SLIP_NORM_RISE_STEP * rise_scale[hit_count]);
         h.norm_quiet_ticks = h.norm_decay_ticks = 0;
         h.norm_decay_start = 0.0f;
     } else if (h.norm_quiet_ticks < SLIP_NORM_HOLD_TICKS) {
@@ -400,6 +408,6 @@ void chassis_coor::chassis_actuator()
         restart_pending_ = false;
     }
 
-    const auto& c = chassis_.get_data();
-    bsp_uart_printf(E_UART_1,"%f,%f,%f\r\n",c.kalman_vel,c.lqr_state.dot_x,fsm_.ctrl == E_NORMAL && slip_.valid ? fsm_.slip_norm : 0.0f);
+    auto ch = chassis_.get_data();
+    bsp_uart_printf(E_UART_1,"%f\r\n", ch.lqr_state.dot_x);
 }

@@ -65,7 +65,7 @@ void Leg_observer::leg_after_clc()
     leg_data *ptr[2]={&leg_data_left, &leg_data_right};
     for (auto i:ptr)
     {
-        float delta_time = 1.0f/WHEEL_CHASSIS_HZ;
+        constexpr float delta_time = 1.0f / 1000.0f;
         float delta_phi = atan2f(sinf(i->leg_phi - i->old_phi),
                                  cosf(i->leg_phi - i->old_phi));
         float delta_len = i->leg_len - i->old_len;

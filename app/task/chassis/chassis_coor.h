@@ -14,6 +14,7 @@
 #include "leg_data_observer.h"
 #include "rc/dr16.h"
 #include "filter/window_filter.h"
+#include "filter/lowpass_filter.h"
 using namespace Controller;
 using namespace Observer;
 
@@ -42,7 +43,7 @@ namespace Coordinator
         float left_velocity, right_velocity; // 还原到机体中心，m/s
         float left_residual, right_residual; // B：轮速幅值减 KF 预测速度幅值，m/s
         float yaw_residual; // 有符号偏航失配，rad/s；yaw_slip 只记录 A 超限
-        float left_delta_residual, right_delta_residual; // C：平均轮速增量幅值减平均 IMU 增量幅值，m/s
+        float left_delta_residual, right_delta_residual; // C：滤波轮加速度幅值减滤波 IMU 加速度幅值，m/s²
         float left_norm, right_norm; // 本拍左右证据强度 [0,1]
         float slip_norm; // 统一累计的整车置信度 [0,1]
         float reference_velocity, dt; // KF 更新前预测（m/s）、实际间隔（s）；inertial_reference 恒为 false
@@ -74,10 +75,7 @@ namespace Coordinator
         :lqr_ctrl_(lqr_ctrl), left_leg_ctrl_(left_leg_ctrl), right_leg_ctrl_(right_leg_ctrl),
         left_leg_observer_(left_leg_observer), right_leg_observer_(right_leg_observer),
         base_data_observer_(base_data_observer), motors_(motors)
-        {
-            kalman_vel_observer_.enable();
-
-        };
+        {};
         void chassis_observer();//调用下面的两个私有的结构体更新内容
         void chassis_command();//负责解析命令
         void chassis_condition();//做状态机规划，修改当前的控制状态
@@ -118,8 +116,10 @@ namespace Coordinator
             uint64_t recover_us[2]{};
             unsigned norm_quiet_ticks = 0, norm_decay_ticks = 0;
             float norm_decay_start = 0.0f;
-            float last_left_velocity = 0.0f, last_right_velocity = 0.0f;
-            filter::moving_average_filter<SLIP_AVERAGE_SAMPLES> left_delta_filter{}, right_delta_filter{}, imu_delta_filter{};
+            float last_left_wheel_velocity = 0.0f, last_right_velocity = 0.0f;
+            filter::moving_average_filter<SLIP_LEFT_ACCEL_AVERAGE_SAMPLES> left_acc_average{};
+            filter::low_pass_filter left_acc_filter{SLIP_LEFT_ACCEL_CUTOFF_HZ, WHEEL_CHASSIS_HZ};
+            filter::moving_average_filter<SLIP_AVERAGE_SAMPLES> right_delta_filter{}, imu_delta_filter{};
             bool tracking = false;
         } slip_history_{};
         slip_data slip_{};

@@ -72,10 +72,7 @@ float ChassisVelObserver::update(Base_data_observer *base_observer, Leg_observer
 {
     diagnostics_ = {};
     if (!enabled_) return 0.0f;
-    const auto chassis = base_observer->get_chassis_data();
-    const auto left_leg = left_observer->get_leg_data().first;
-    const auto right_leg = right_observer->get_leg_data().second;
-    const auto& posture = chassis.body;
+    const float body_vel = chassis_move_clc(base_observer, left_observer, right_observer);
     const bool slip_adapted = slip_confidence > SLIP_KF_CONFIDENCE_GATE;
     const double q_vv = slip_adapted ? SLIP_KF_Q_VEL : CHASSIS_KF_Q_VEL;
     const double q_aa = slip_adapted ? SLIP_KF_Q_ACC : CHASSIS_KF_Q_ACC;
@@ -88,6 +85,25 @@ float ChassisVelObserver::update(Base_data_observer *base_observer, Leg_observer
     // const double r_vv = 0.1*100000;
     // const double r_aa = 0.1f;
 
+    diagnostics_.predicted_velocity = static_cast<float>(kalman_vel + (1.0 / WHEEL_CHASSIS_HZ) * kalman_acc);
+    const bool had_prediction = kalman_initialized_;
+    if (chassis_kalman(diagnostics_.acc_x, body_vel, q_vv, q_aa, r_vv, r_aa)
+        && std::isfinite(wheel_relative_vel_)) {
+        diagnostics_.valid = had_prediction && std::isfinite(diagnostics_.left_velocity)
+                          && std::isfinite(diagnostics_.right_velocity) && std::isfinite(body_vel)
+                          && std::isfinite(diagnostics_.acc_x) && std::isfinite(diagnostics_.yaw_rate)
+                          && std::isfinite(diagnostics_.predicted_velocity);
+    }
+    return body_vel;
+}
+
+float ChassisVelObserver::chassis_move_clc(Base_data_observer *base_observer, Leg_observer *left_observer,
+                                           Leg_observer *right_observer)
+{
+    const auto chassis = base_observer->get_chassis_data();
+    const auto left_leg = left_observer->get_leg_data().first;
+    const auto right_leg = right_observer->get_leg_data().second;
+    const auto& posture = chassis.body;
     // 水平坐标系随航向转动，X 轴沿机头的水平投影。
 
     const auto body_to_level = math::matrix<3, 3>::rot_euler(
@@ -108,17 +124,9 @@ float ChassisVelObserver::update(Base_data_observer *base_observer, Leg_observer
     // 横向位置 y 的前向速度为 -y * yaw_rate，与腿运动补偿使用同一投影。
     const float yaw_rate = body_to_level(0, 0) * posture.body_gyro_yaw
                          - body_to_level(0, 2) * posture.body_gyro_roll;
+    wheel_relative_vel_ = relative_vel;
     diagnostics_ = {vel_wheel_left - relative_left, vel_wheel_right - relative_right,
-                    body_vel, acc_x, yaw_rate,
-                    static_cast<float>(kalman_vel + (1.0 / WHEEL_CHASSIS_HZ) * kalman_acc), false};
-    const bool had_prediction = kalman_initialized_;
-    if (chassis_kalman(acc_x, body_vel, q_vv, q_aa, r_vv, r_aa) && std::isfinite(relative_vel)) {
-        wheel_relative_vel_ = relative_vel;
-        diagnostics_.valid = had_prediction && std::isfinite(diagnostics_.left_velocity)
-                          && std::isfinite(diagnostics_.right_velocity) && std::isfinite(body_vel)
-                          && std::isfinite(acc_x) && std::isfinite(yaw_rate)
-                          && std::isfinite(diagnostics_.predicted_velocity);
-    }
+                    body_vel, acc_x, yaw_rate, 0.0f, false};
     return body_vel;
 }
 

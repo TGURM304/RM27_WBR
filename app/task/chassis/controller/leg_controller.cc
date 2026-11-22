@@ -43,7 +43,7 @@ void LegController::leg_forward_clc()
 
 void LegController::leg_len_ctrl()
 {
-    constexpr float dt = 1.0f / WHEEL_CHASSIS_HZ;
+    constexpr float dt = 1.0f / 1000.0f;
     const float target_speed = len_pid.update(leg_ctrl_.current_len, leg_ctrl_.target_len, dt);
     const float force_L = speed_pid.update(leg_ctrl_.current_speed, target_speed, dt);
     const auto tor = vmc_pol_clc(leg_ctrl_.small_rad, leg_ctrl_.big_rad, 0.0f, force_L);
@@ -53,7 +53,7 @@ void LegController::leg_len_ctrl()
 
 void LegController::leg_rad_ctrl()
 {
-    constexpr float dt = 1.0f / WHEEL_CHASSIS_HZ;
+    constexpr float dt = 1.0f / 1000.0f;
     const float target_omega = rad_pid.update(0.0f, leg_ctrl_.rad_error, dt);
     const float tor_M = omega_pid.update(leg_ctrl_.current_omega, target_omega, dt);
     const auto tor = vmc_pol_clc(leg_ctrl_.small_rad, leg_ctrl_.big_rad, tor_M, 0.0f);
