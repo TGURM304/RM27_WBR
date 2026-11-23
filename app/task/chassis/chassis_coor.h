@@ -13,8 +13,6 @@
 #include "chassis_vel_observer.h"
 #include "leg_data_observer.h"
 #include "rc/dr16.h"
-#include "filter/window_filter.h"
-#include "filter/lowpass_filter.h"
 using namespace Controller;
 using namespace Observer;
 
@@ -38,16 +36,6 @@ namespace Coordinator
         Controller::output lqr;
         out_put_tor left_leg, right_leg;
     };
-    struct slip_data {
-        bool valid, left_slip, right_slip, yaw_slip, inertial_reference;
-        float left_velocity, right_velocity; // 还原到机体中心，m/s
-        float left_residual, right_residual; // B：轮速幅值减 KF 预测速度幅值，m/s
-        float yaw_residual; // 有符号偏航失配，rad/s；yaw_slip 只记录 A 超限
-        float left_delta_residual, right_delta_residual; // C：滤波轮加速度幅值减滤波 IMU 加速度幅值，m/s²
-        float left_norm, right_norm; // 本拍左右证据强度 [0,1]
-        float slip_norm; // 统一累计的整车置信度 [0,1]
-        float reference_velocity, dt; // KF 更新前预测（m/s）、实际间隔（s）；inertial_reference 恒为 false
-    };
     typedef enum
     {
         E_REST,
@@ -59,10 +47,22 @@ namespace Coordinator
     }ctrl_enum;//用于枚举机器人当前状态
     typedef struct
     {
+        float left_hip_vel, right_hip_vel;//这里是髋关节的运动线速度
+        /*
+         * 定义：轮子中心相对地面的线速度为vel_wheel_l/r，腿部运行的腿长为l，腿长变化速度为dot_l
+         * 腿部相对竖直方向的摆角角度为theta（使用竖直的时候为0的坐标系，是LQR那一部分的建模的腿部摆角theta）
+         * ，腿部角速度为dot_theta
+         * 于是可以得到：hip_vel = vel_wheel + l*dot_theta*cos(theta) + sin(theta)*dot_l
+         * 其中vel_wheel不是我们的轮编码器对应的轮子编码器的反馈速度，首先我们求输出轴相对地面的绝对角速度
+         * 编码器角速度为encoder_omega，输出轴角速度为out_omega，out_omega = encoder_omega + dot_theta
+         * hip_gry = (right_hip_vel - left_hip_vel)/2/两轮半轮距
+         */
+        float ins_yaw_gry, hip_gry;//陀螺仪获得的yaw角速度和轮子解算后的yaw转速
+    }slip;
+    typedef struct
+    {
         ctrl_enum ctrl;//底盘的控制状态机
-        //打滑证据强度 [0,1]，采用带饱和的分段线性映射；锁存状态另含滞回
-        //门限和归一化处理的内容可以在chassis_data_config.h文件中的SLIP_GATE_xxx中进行调配
-        float slip_norm;
+        slip slip_;
     }chassis_fsm;
     class chassis_coor
     {
@@ -84,7 +84,6 @@ namespace Coordinator
         void chassis_actuator();//输出电机力矩
         [[nodiscard]] const chassis_output& get_output() const { return output_; }
         [[nodiscard]] ctrl_enum get_state() const { return fsm_.ctrl; }
-        [[nodiscard]] slip_data get_slip_data() const { return slip_; }
     //不同状态机的控制函数
     private:
         void getup();//收腿到0.14m并将腿调整到机体系竖直
@@ -93,7 +92,9 @@ namespace Coordinator
         void step_up();//磕腿上台阶
         void rest();//全部电机输出0，并且重新置零所有电机和观测器的积分累计内容
         void restart();//重新置位和重新reset所有电机，然后进行enable
-        void slip_clc();//计算轮腿打滑的可信度
+    //打滑检测和机体观测相关内容
+    private:
+        void body_omega_clc();
     //成员变量
     private:
         ChassisLQR *lqr_ctrl_;
@@ -113,18 +114,6 @@ namespace Coordinator
         leg_ctrl_data left_cmd_{}, right_cmd_{};
         chassis_output output_{};
         chassis_fsm fsm_{};
-        struct slip_history {
-            uint64_t start_us = 0, last_us = 0;
-            uint64_t recover_us[2]{};
-            unsigned norm_quiet_ticks = 0, norm_decay_ticks = 0;
-            float norm_decay_start = 0.0f;
-            float last_left_wheel_velocity = 0.0f, last_right_velocity = 0.0f;
-            filter::moving_average_filter<SLIP_LEFT_ACCEL_AVERAGE_SAMPLES> left_acc_average{};
-            filter::low_pass_filter left_acc_filter{SLIP_LEFT_ACCEL_CUTOFF_HZ, WHEEL_CHASSIS_HZ};
-            filter::moving_average_filter<SLIP_AVERAGE_SAMPLES> right_delta_filter{}, imu_delta_filter{};
-            bool tracking = false;
-        } slip_history_{};
-        slip_data slip_{};
         //受到严格保护的更新和存储函数
     private:
         //以下内容需要为订阅发布制度的结构体，想要读写数据都需要通过下面的结构体，保证数据不会被乱写乱用

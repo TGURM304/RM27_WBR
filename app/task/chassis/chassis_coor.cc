@@ -10,9 +10,6 @@
 
 using namespace Coordinator;
 
-float temp_delt_vel_ = 0.0f;
-float temp_acc_ = 0.0f;
-
 namespace {
 float wrap_angle(float angle) {
     return atan2f(sinf(angle), cosf(angle));
@@ -66,15 +63,35 @@ void chassis_coor::chassis_observer()
     }
     next.lqr_state.x -= leg_motion_distance_;
     chassis_.update_data(next);
+    body_omega_clc();
 }
 
+void chassis_coor::body_omega_clc()
+{
+    const auto& b = base_.get_data();
+    const auto& c = chassis_.get_data();
+    const auto& state = c.lqr_state;
+    auto& slip = fsm_.slip_;
+
+    // 水平工况，近似认为 GW 与虚拟腿 AW 的角速度相同。
+    const float left_wheel_vel = WHEEL_RADIUS * (b.motor_left.angular_velocity + state.dot_left_theta);
+    const float right_wheel_vel = WHEEL_RADIUS * (b.motor_right.angular_velocity + state.dot_right_theta);
+    slip.left_hip_vel = left_wheel_vel
+        + c.left_leg_state.current_len * state.dot_left_theta * cosf(state.left_theta)
+        + c.left_leg_state.current_speed * sinf(state.left_theta);
+    slip.right_hip_vel = right_wheel_vel
+        + c.right_leg_state.current_len * state.dot_right_theta * cosf(state.right_theta)
+        + c.right_leg_state.current_speed * sinf(state.right_theta);
+    slip.hip_gry = (slip.right_hip_vel - slip.left_hip_vel) / (2.0f * WHEEL_DIS);
+    slip.ins_yaw_gry = b.body.body_gyro_yaw;
+}
 
 void chassis_coor::chassis_command()
 {
     remote_ = rc::dr16::state();
-    target_vel_ = 2.0f * std::clamp(remote_.rc_l[1] / 800.0f, -1.0f, 1.0f);
-    target_omega_ = -5.0f * std::clamp(remote_.reserved / 660.0f, -1.0f, 1.0f);
-    target_leg_vel_ = 0.3f * std::clamp(remote_.rc_r[1] / 800.0f, -1.0f, 1.0f);
+    target_vel_ = 2.0f * std::clamp((float)remote_.rc_l[1] / 800.0f, -1.0f, 1.0f);
+    target_omega_ = -5.0f * std::clamp((float)remote_.reserved / 660.0f, -1.0f, 1.0f);
+    target_leg_vel_ = 0.3f * std::clamp((float)remote_.rc_r[1] / 800.0f, -1.0f, 1.0f);
     start_request_ = remote_seen_ && remote_.timestamp != 0 && remote_.s_l == 1 && !last_enabled_;
     if (remote_.timestamp != 0) {
         remote_seen_ = true;
@@ -192,9 +209,6 @@ void chassis_coor::rest()
     left_leg_ctrl_->leg_disable();
     right_leg_ctrl_->leg_disable();
     if (lqr_ctrl_) lqr_ctrl_->lqr_disable();
-    slip_history_ = {};
-    slip_ = {};
-    fsm_.slip_norm = 0.0f;
     base_data_observer_->reset_wheel_odometry();
     leg_motion_distance_ = 0.0f;
     leg_motion_ready_ = false;
@@ -221,129 +235,6 @@ void chassis_coor::restart()
         wheel->clear();
         wheel->enable();
     }
-}
-
-void chassis_coor::slip_clc()
-{
-    const auto& b = base_.get_data();
-    const auto d = kalman_vel_observer_.get_diagnostics();
-    auto& h = slip_history_;
-    const uint64_t now = bsp_time_get_us();
-    const uint32_t now_ms = bsp_time_get_ms();
-    const auto fresh = [now_ms](uint32_t timestamp) {
-        return timestamp != 0 && static_cast<uint32_t>(now_ms - timestamp) <= SLIP_FEEDBACK_TIMEOUT_MS;
-    };
-    const auto invalidate = [&] {
-        if (h.tracking) {
-            h = {};
-            slip_ = {};
-        }
-        slip_.valid = false;
-        fsm_.slip_norm = 0.0f;
-    };
-    const bool eligible = fsm_.ctrl == E_NORMAL && ins::ready() && d.valid
-        && fabsf(b.body.body_gyro_yaw) < SLIP_MAX_YAW_RATE
-        && fabsf(b.body.body_roll) <= SLIP_MAX_BODY_ANGLE
-        && fabsf(b.body.body_theta) <= SLIP_MAX_BODY_ANGLE
-        && fresh(b.motor_left.timestamp) && fresh(b.motor_right.timestamp)
-        && fresh(b.j1.timestamp) && fresh(b.j2.timestamp) && fresh(b.j3.timestamp) && fresh(b.j4.timestamp);
-    if (!eligible || (h.tracking && (now <= h.last_us || now - h.last_us > SLIP_MAX_INTERVAL_MS * 1000ULL))) {
-        invalidate();
-        return;
-    }
-
-    const float left_velocity = d.left_velocity + WHEEL_DIS * d.yaw_rate;
-    const float right_velocity = d.right_velocity - WHEEL_DIS * d.yaw_rate;
-    const float left_wheel_velocity = b.motor_left.linear_velocity;
-    if (!h.tracking) {
-        h.tracking = true;
-        h.start_us = h.last_us = now;
-        h.last_left_wheel_velocity = left_wheel_velocity;
-        h.last_right_velocity = right_velocity;
-        return;
-    }
-    constexpr float dt = 1.0f / 1000.0f;
-    const float left_acc = (left_wheel_velocity - h.last_left_wheel_velocity) / dt;
-    const float left_acc_mean = h.left_acc_average.update(left_acc);
-    const float left_delta = h.left_acc_filter.update(left_acc_mean);
-    const float right_delta = h.right_delta_filter.update(right_velocity - h.last_right_velocity)/dt;
-    const float imu_delta = h.imu_delta_filter.update(d.acc_x);
-    h.last_us = now;
-    h.last_left_wheel_velocity = left_wheel_velocity;
-    h.last_right_velocity = right_velocity;
-
-    slip_.left_velocity = left_velocity;
-    slip_.right_velocity = right_velocity;
-    slip_.reference_velocity = d.predicted_velocity;
-    slip_.inertial_reference = false;
-    slip_.dt = dt;
-    slip_.left_residual = fabsf(left_velocity) - fabsf(d.predicted_velocity);
-    slip_.right_residual = fabsf(right_velocity) - fabsf(d.predicted_velocity);
-    slip_.yaw_residual = (d.right_velocity - d.left_velocity) / (2.0f * WHEEL_DIS) - d.yaw_rate;
-    slip_.left_delta_residual = fabsf(left_delta) - fabsf(imu_delta);
-    slip_.right_delta_residual = fabsf(right_delta) - fabsf(imu_delta);
-    temp_delt_vel_ = left_delta;
-    temp_acc_ = imu_delta;
-    if (!std::isfinite(slip_.left_residual) || !std::isfinite(slip_.right_residual)
-        || !std::isfinite(slip_.left_delta_residual) || !std::isfinite(slip_.right_delta_residual)
-        || !std::isfinite(slip_.yaw_residual)) {
-        invalidate();
-        return;
-    }
-    if (now - h.start_us < SLIP_WARMUP_MS * 1000ULL) return;
-
-    const float yaw_error = fabsf(slip_.yaw_residual);
-    slip_.yaw_slip = yaw_error >= SLIP_GATE_YAW_ENTER;
-    // HERO_LEG：整车 (A || B_left || B_right) 门控，再判断本侧 C。
-    const bool gate = slip_.yaw_slip || slip_.left_residual >= SLIP_GATE_VEL_ENTER
-                                   || slip_.right_residual >= SLIP_GATE_VEL_ENTER;
-    const float velocity_error[2] = {slip_.left_residual, slip_.right_residual};
-    const float delta_error[2] = {slip_.left_delta_residual, slip_.right_delta_residual};
-    bool *flags[2] = {&slip_.left_slip, &slip_.right_slip};
-    for (unsigned i = 0; i < 2; ++i) {
-        if (!*flags[i] && gate && delta_error[i] >= SLIP_GATE_DELTA_ENTER) *flags[i] = true;
-        if (*flags[i] && velocity_error[i] <= SLIP_GATE_VEL_RECOVER && yaw_error <= SLIP_GATE_YAW_RECOVER) {
-            if (h.recover_us[i] == 0) h.recover_us[i] = now;
-            if (now - h.recover_us[i] >= SLIP_RECOVER_MS * 1000ULL) {
-                *flags[i] = false;
-                h.recover_us[i] = 0;
-            }
-        } else h.recover_us[i] = 0;
-    }
-
-    const auto strength = [](float residual, float low, float high) {
-        return std::clamp((residual - low) / (high - low), 0.0f, 1.0f);
-    };
-    const float gate_strength = std::max({
-        strength(yaw_error, SLIP_GATE_YAW_RECOVER, SLIP_GATE_YAW_ENTER),
-        strength(slip_.left_residual, SLIP_GATE_VEL_RECOVER, SLIP_GATE_VEL_ENTER),
-        strength(slip_.right_residual, SLIP_GATE_VEL_RECOVER, SLIP_GATE_VEL_ENTER)});
-    slip_.left_norm = std::min(gate_strength,
-        strength(slip_.left_delta_residual, SLIP_GATE_DELTA_RECOVER, SLIP_GATE_DELTA_ENTER));
-    slip_.right_norm = std::min(gate_strength,
-        strength(slip_.right_delta_residual, SLIP_GATE_DELTA_RECOVER, SLIP_GATE_DELTA_ENTER));
-    const bool velocity_hit = slip_.left_residual >= SLIP_GATE_VEL_ENTER
-                           || slip_.right_residual >= SLIP_GATE_VEL_ENTER;
-    const bool acceleration_hit = slip_.left_delta_residual >= SLIP_GATE_DELTA_ENTER
-                               || slip_.right_delta_residual >= SLIP_GATE_DELTA_ENTER;
-    const unsigned hit_count = static_cast<unsigned>(slip_.yaw_slip) + velocity_hit + acceleration_hit;
-    constexpr float rise_scale[4] = {0.0f, SLIP_NORM_ONE_CONDITION_SCALE, SLIP_NORM_TWO_CONDITION_SCALE, 1.0f};
-    if (hit_count != 0) {
-        slip_.slip_norm = std::min(1.0f, slip_.slip_norm + SLIP_NORM_RISE_STEP * rise_scale[hit_count]);
-        h.norm_quiet_ticks = h.norm_decay_ticks = 0;
-        h.norm_decay_start = 0.0f;
-    } else if (h.norm_quiet_ticks < SLIP_NORM_HOLD_TICKS) {
-        ++h.norm_quiet_ticks;
-    } else if (h.norm_decay_ticks < SLIP_NORM_DECAY_TICKS) {
-        if (h.norm_decay_ticks == 0) h.norm_decay_start = slip_.slip_norm;
-        ++h.norm_decay_ticks;
-        const double t = h.norm_decay_ticks * 0.001;
-        constexpr double duration = SLIP_NORM_DECAY_SECONDS;
-        // n=n0-t²/T²，即 dn/dt=-(2/T²)*t；T 由配置指定。
-        slip_.slip_norm = static_cast<float>(std::max(0.0, h.norm_decay_start - t * t / (duration * duration)));
-    }
-    slip_.valid = true;
-    fsm_.slip_norm = slip_.slip_norm;
 }
 
 void chassis_coor::chassis_controller()
@@ -417,5 +308,6 @@ void chassis_coor::chassis_actuator()
     }
 
     auto ch = chassis_.get_data();
-    bsp_uart_printf(E_UART_1,"%f\r\n", ch.lqr_state.dot_x);
+    auto hip = fsm_.slip_.hip_gry;
+    bsp_uart_printf(E_UART_1,"%f,%f\r\n", ch.lqr_state.dot_phi,hip);
 }
