@@ -104,6 +104,8 @@ namespace Coordinator
         bool state_entry_ = true, restart_pending_ = false;
         bool remote_seen_ = false, last_enabled_ = false, start_request_ = false;
         uint32_t normal_start_ms_ = 0;
+        float leg_motion_distance_ = 0.0f; // 轮编码器里程中的执行机构运动分量，m
+        bool leg_motion_ready_ = false;
         float target_vel_ = 0.0f, target_omega_ = 0.0f; // m/s、rad/s
         float target_leg_vel_ = 0.0f; // 高度变化速度，m/s
         float target_height_ = NORMAL_INIT_HEIGHT; // m

@@ -48,19 +48,19 @@ void ChassisLQR::lqr_feedback_clc(float target_vel, float target_omega, const ch
     }
     constexpr float dt = 1.0f / WHEEL_CHASSIS_HZ;
     target_pos.x += target_vel * dt;
-    const float position_error = fabsf(target_pos.x - current_pos.x);
-    if (fabsf(target_vel) > 0.5f || fabsf(current_pos.dot_x) > 0.5f || position_error > 0.5f)
+    const float velocity_error = fabsf(target_vel - current_pos.dot_x);
+    if (fabsf(target_vel) > 0.5f || velocity_error > 0.5f)
         position_enabled = false;
-    else if (fabsf(target_vel) < 0.3f && fabsf(current_pos.dot_x) < 0.4f && position_error < 0.4f)
+    else if (fabsf(target_vel) < 0.3f && velocity_error < 0.4f)
         position_enabled = true;
     if (!position_enabled)
-        target_pos.x = current_pos.x + current_pos.dot_x * dt;
+        target_pos.x = current_pos.x + target_vel * dt;
     target_pos.phi = wrap_angle(target_pos.phi + target_omega * dt);
     target_pos.dot_x = target_vel;
     target_pos.dot_phi = target_omega;
 
     const float error[10] = {
-        position_enabled ? target_pos.x - current_pos.x - feed_dis : 0.0f,
+        (position_enabled ? target_pos.x - current_pos.x : 0.0f) - feed_dis,
         target_pos.dot_x - current_pos.dot_x,
         wrap_angle(target_pos.phi - current_pos.phi),
         target_pos.dot_phi - current_pos.dot_phi,

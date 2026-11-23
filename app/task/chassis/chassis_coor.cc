@@ -58,7 +58,13 @@ void chassis_coor::chassis_observer()
     if (fsm_.ctrl == E_STAND || fsm_.ctrl == E_NORMAL) {
         next.lqr_state.dot_x = kalman_vel_observer_.chassis_move_clc(
             base_data_observer_, left_leg_observer_, right_leg_observer_);
+        const float encoder_velocity = 0.5f * (b.motor_left.linear_velocity + b.motor_right.linear_velocity);
+        // 与速度使用同一补偿：S_body = S_encoder − ∫(v_encoder − v_body)dt。
+        if (leg_motion_ready_)
+            leg_motion_distance_ += (encoder_velocity - next.lqr_state.dot_x) * (1.0f / 1000.0f);
+        leg_motion_ready_ = true;
     }
+    next.lqr_state.x -= leg_motion_distance_;
     chassis_.update_data(next);
 }
 
@@ -190,6 +196,8 @@ void chassis_coor::rest()
     slip_ = {};
     fsm_.slip_norm = 0.0f;
     base_data_observer_->reset_wheel_odometry();
+    leg_motion_distance_ = 0.0f;
+    leg_motion_ready_ = false;
     left_leg_observer_->leg_clear();
     if (right_leg_observer_ != left_leg_observer_) right_leg_observer_->leg_clear();
     target_height_ = NORMAL_INIT_HEIGHT;
