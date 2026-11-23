@@ -66,7 +66,7 @@
 #define NORMAL_HEIGHT_MAX (0.33f)
 #define NORMAL_HEIGHT_COMP_ANGLE (30.0f/180.0f*PI)
 #define LEG_SUPPORT_FADE_START (30.0f/180.0f*PI)
-#define LEG_SUPPORT_FADE_END (40.0f/180.0f*PI)
+#define LEG_SUPPORT_FADE_END (50.0f/180.0f*PI)
 
 
 // HERO_LEG 每拍直接使用的 Q/R 对角协方差，非标准差，不再乘 dt 换算。

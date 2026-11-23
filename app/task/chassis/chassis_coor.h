@@ -54,7 +54,8 @@ namespace Coordinator
          * ，腿部角速度为dot_theta
          * 于是可以得到：hip_vel = vel_wheel + l*dot_theta*cos(theta) + sin(theta)*dot_l
          * 其中vel_wheel不是我们的轮编码器对应的轮子编码器的反馈速度，首先我们求输出轴相对地面的绝对角速度
-         * 编码器角速度为encoder_omega，输出轴角速度为out_omega，out_omega = encoder_omega + dot_theta
+         * 编码器角速度为encoder_omega，输出轴角速度为out_omega，out_omega = encoder_omega + dot_GW
+         * dot_GW为电机安装杆角速度，由两关节角度和角速度解算，与虚拟腿角速度dot_theta区分。
          * hip_gry = (right_hip_vel - left_hip_vel)/2/两轮半轮距
          */
         float ins_yaw_gry, hip_gry;//陀螺仪获得的yaw角速度和轮子解算后的yaw转速
@@ -63,6 +64,7 @@ namespace Coordinator
     {
         ctrl_enum ctrl;//底盘的控制状态机
         slip slip_;
+
     }chassis_fsm;
     class chassis_coor
     {
@@ -75,7 +77,7 @@ namespace Coordinator
         :lqr_ctrl_(lqr_ctrl), left_leg_ctrl_(left_leg_ctrl), right_leg_ctrl_(right_leg_ctrl),
         left_leg_observer_(left_leg_observer), right_leg_observer_(right_leg_observer),
         base_data_observer_(base_data_observer), motors_(motors)
-        {};
+        { kalman_vel_observer_.enable(); };
         void chassis_observer();//调用下面的两个私有的结构体更新内容
         void chassis_command();//负责解析命令
         void chassis_condition();//做状态机规划，修改当前的控制状态

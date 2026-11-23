@@ -5,12 +5,66 @@
 #include "chassis_coor.h"
 #include "chassis_data_conifg.h"
 #include "bsp/time.h"
+#include "math/matrix.h"
 #include <algorithm>
 #include <cmath>
 
 using namespace Coordinator;
 
 namespace {
+float wheel_mount_rate(const Observer::leg_data& leg, const Observer::joints& big_joint)
+{
+    const float sin_phi = std::sin(leg.leg_phi);
+    const float cos_phi = std::cos(leg.leg_phi);
+    const float ag_x = LEG_LEN_AG * std::cos(big_joint.pos_);
+    const float ag_y = LEG_LEN_AG * std::sin(big_joint.pos_);
+    const float gw_x = leg.leg_len * cos_phi - ag_x;
+    const float gw_y = leg.leg_len * sin_phi - ag_y;
+
+    // GW = AW − AG，角速度为 (GW × dGW/dt) / |GW|²。
+    const float tangent_speed = leg.leg_len * leg.leg_phi_dot;
+    const float gw_vx = leg.leg_len_dot * cos_phi - tangent_speed * sin_phi + ag_y * big_joint.vel_;
+    const float gw_vy = leg.leg_len_dot * sin_phi + tangent_speed * cos_phi - ag_x * big_joint.vel_;
+    return (gw_x * gw_vy - gw_y * gw_vx) / (LEG_LEN_GW * LEG_LEN_GW);
+}
+
+float wheel_relative_velocity(const Observer::leg_data& leg, const Observer::body_posture& posture,
+                              const math::matrix<3, 3>& body_to_level)
+{
+    const float cos_phi = std::cos(leg.leg_phi), sin_phi = std::sin(leg.leg_phi);
+    const float x = leg.leg_len * cos_phi, z = -leg.leg_len * sin_phi;
+    const float tangent_speed = leg.leg_len * leg.leg_phi_dot;
+
+    // 机体 X 向前、Z 向上。左右安装点的横向偏置在轮轴中心平均时相消。
+    const math::matrix<3, 1> relative_velocity{
+        leg.leg_len_dot * cos_phi - tangent_speed * sin_phi + posture.body_gyro_pitch * z,
+        posture.body_gyro_yaw * x - posture.body_gyro_roll * z,
+        -leg.leg_len_dot * sin_phi - tangent_speed * cos_phi - posture.body_gyro_pitch * x
+    };
+    return (body_to_level * relative_velocity)[0];
+}
+
+float body_velocity_clc(const chassis_basedata& chassis, const leg_data& left_leg, const leg_data& right_leg)
+{
+    const auto& posture = chassis.body;
+    // 水平坐标系随航向转动，X 轴沿机头的水平投影。
+
+    const auto body_to_level = math::matrix<3, 3>::rot_euler(
+        posture.body_roll, posture.body_theta, 0.0f);
+
+    const float left_mount_rate = wheel_mount_rate(left_leg, chassis.j3);
+    const float right_mount_rate = wheel_mount_rate(right_leg, chassis.j2);
+    const float body_axle_rate = posture.body_gyro_pitch;
+    const float vel_wheel_left = WHEEL_RADIUS * (chassis.motor_left.angular_velocity + left_mount_rate + body_axle_rate);
+    const float vel_wheel_right = WHEEL_RADIUS * (chassis.motor_right.angular_velocity + right_mount_rate + body_axle_rate);
+    const float vel_wheel = 0.5f * (vel_wheel_left + vel_wheel_right);
+    const float relative_left = wheel_relative_velocity(left_leg, posture, body_to_level);
+    const float relative_right = wheel_relative_velocity(right_leg, posture, body_to_level);
+    const float relative_vel = 0.5f * (relative_left + relative_right);
+    const float body_vel = vel_wheel - relative_vel;
+    return body_vel;
+}
+
 float wrap_angle(float angle) {
     return atan2f(sinf(angle), cosf(angle));
 }
@@ -53,8 +107,7 @@ void chassis_coor::chassis_observer()
     next.left_leg_state = {left.leg_phi, left.leg_phi_dot, left.leg_len, left.leg_len_dot};
     next.right_leg_state = {right.leg_phi, right.leg_phi_dot, right.leg_len, right.leg_len_dot};
     if (fsm_.ctrl == E_STAND || fsm_.ctrl == E_NORMAL) {
-        next.lqr_state.dot_x = kalman_vel_observer_.chassis_move_clc(
-            base_data_observer_, left_leg_observer_, right_leg_observer_);
+        next.lqr_state.dot_x = body_velocity_clc(b, left, right);
         const float encoder_velocity = 0.5f * (b.motor_left.linear_velocity + b.motor_right.linear_velocity);
         // 与速度使用同一补偿：S_body = S_encoder − ∫(v_encoder − v_body)dt。
         if (leg_motion_ready_)
@@ -64,6 +117,8 @@ void chassis_coor::chassis_observer()
     next.lqr_state.x -= leg_motion_distance_;
     chassis_.update_data(next);
     body_omega_clc();
+    kalman_vel_observer_.kalman_clc(b.body.body_x_acc,
+        fsm_.slip_.left_hip_vel, fsm_.slip_.right_hip_vel, 1.0f, 10.0f, 0.1f, 0.1f);
 }
 
 void chassis_coor::body_omega_clc()
@@ -73,9 +128,18 @@ void chassis_coor::body_omega_clc()
     const auto& state = c.lqr_state;
     auto& slip = fsm_.slip_;
 
-    // 水平工况，近似认为 GW 与虚拟腿 AW 的角速度相同。
-    const float left_wheel_vel = WHEEL_RADIUS * (b.motor_left.angular_velocity + state.dot_left_theta);
-    const float right_wheel_vel = WHEEL_RADIUS * (b.motor_right.angular_velocity + state.dot_right_theta);
+    const auto mount_rate = [](const joints& small, const joints& big) {
+        float delta = fmodf(big.pos_ - small.pos_, 2.0f * PI);
+        if (delta < 0.0f) delta += 2.0f * PI;
+        const float half = 0.5f * delta;
+        constexpr float k = LEG_LEN_AD / LEG_LEN_CD;
+        const float s = k * sinf(half);
+        // GW 方向为 joint_big − delta/2 − asin(k*sin(delta/2))。
+        const float h = 1.0f + k * cosf(half) / sqrtf(1.0f - s * s);
+        return big.vel_ - 0.5f * h * (big.vel_ - small.vel_);
+    };
+    const float left_wheel_vel = WHEEL_RADIUS * (b.motor_left.angular_velocity + mount_rate(b.j4, b.j3));
+    const float right_wheel_vel = WHEEL_RADIUS * (b.motor_right.angular_velocity + mount_rate(b.j1, b.j2));
     slip.left_hip_vel = left_wheel_vel
         + c.left_leg_state.current_len * state.dot_left_theta * cosf(state.left_theta)
         + c.left_leg_state.current_speed * sinf(state.left_theta);
@@ -84,6 +148,8 @@ void chassis_coor::body_omega_clc()
         + c.right_leg_state.current_speed * sinf(state.right_theta);
     slip.hip_gry = (slip.right_hip_vel - slip.left_hip_vel) / (2.0f * WHEEL_DIS);
     slip.ins_yaw_gry = b.body.body_gyro_yaw;
+    // 正反转分别标定，零速补偿为零。
+    slip.hip_gry += (slip.ins_yaw_gry >= 0.0f ? 0.04f : 0.02f) * slip.ins_yaw_gry;
 }
 
 void chassis_coor::chassis_command()
@@ -307,7 +373,11 @@ void chassis_coor::chassis_actuator()
         restart_pending_ = false;
     }
 
-    auto ch = chassis_.get_data();
-    auto hip = fsm_.slip_.hip_gry;
-    bsp_uart_printf(E_UART_1,"%f,%f\r\n", ch.lqr_state.dot_phi,hip);
+    if (lqr_ctrl_)
+    {
+        const float temp = base_.get_data().body.body_x_acc;
+        const auto kalman = kalman_vel_observer_.get_kalman_data();
+        bsp_uart_printf(E_UART_1,"%f,%f,%f,%f,%f\r\n",
+            fsm_.slip_.hip_gry, fsm_.slip_.ins_yaw_gry, chassis_.get_data().lqr_state.dot_x, kalman.kalman_vel, kalman.kalman_acc);
+    }
 }

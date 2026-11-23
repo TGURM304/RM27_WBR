@@ -49,6 +49,9 @@ namespace Controller
         void lqr_enable(const chassis_state& state);
         // 按值读取四路模型扭矩及各自的前馈分量，单位为 N·m。
         [[nodiscard]] output get_output() const { return output_; }
+        // 本轮 LQR 使用的目标/当前位移，均相对 LQR 零点，单位 m。
+        [[nodiscard]] float get_target_x() const { return target_pos.x; }
+        [[nodiscard]] float get_current_x() const { return current_pos.x; }
     private:
         void lqr_feedback_clc(float target_vel, float target_omega, const chassis_state& state,
             const float (*gain)[10], float feed_dis);
