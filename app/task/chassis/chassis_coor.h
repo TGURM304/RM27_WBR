@@ -59,6 +59,7 @@ namespace Coordinator
          * hip_gry = (right_hip_vel - left_hip_vel)/2/两轮半轮距
          */
         float ins_yaw_gry, hip_gry;//陀螺仪获得的yaw角速度和轮子解算后的yaw转速
+        float confidence; // 打滑置信度，[0,1]
     }slip;
     typedef struct
     {
@@ -97,6 +98,7 @@ namespace Coordinator
     //打滑检测和机体观测相关内容
     private:
         void body_omega_clc();
+        void slip_norm();//角速度误差超限时积累置信度，参数见底盘配置
     //成员变量
     private:
         ChassisLQR *lqr_ctrl_;
@@ -107,6 +109,8 @@ namespace Coordinator
         bool state_entry_ = true, restart_pending_ = false;
         bool remote_seen_ = false, last_enabled_ = false, start_request_ = false;
         uint32_t normal_start_ms_ = 0;
+        unsigned slip_quiet_ticks_ = 0;
+        bool kalman_slipping_ = false;
         float leg_motion_distance_ = 0.0f; // 轮编码器里程中的执行机构运动分量，m
         bool leg_motion_ready_ = false;
         float target_vel_ = 0.0f, target_omega_ = 0.0f; // m/s、rad/s

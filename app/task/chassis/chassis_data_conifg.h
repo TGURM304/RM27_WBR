@@ -68,17 +68,22 @@
 #define LEG_SUPPORT_FADE_START (30.0f/180.0f*PI)
 #define LEG_SUPPORT_FADE_END (50.0f/180.0f*PI)
 
+#define SLIP_YAW_ERROR_THRESHOLD (0.5f) // rad/s，严格大于时积累置信度
+#define SLIP_NORM_RISE_STEP (0.1f) // 每拍上升量
+#define SLIP_NORM_HOLD_TICKS (20u) // 连续未超限的保持拍数，1拍=1ms
+#define SLIP_NORM_FALL_STEP (0.05f) // 保持结束后每拍下降量
 
-// HERO_LEG 每拍直接使用的 Q/R 对角协方差，非标准差，不再乘 dt 换算。
-#define SLIP_KF_CONFIDENCE_GATE (0.5f)
-#define CHASSIS_KF_Q_VEL (0.2f)
-#define CHASSIS_KF_Q_ACC (100.0f)
-#define CHASSIS_KF_R_VEL (3.0f)
-#define CHASSIS_KF_R_ACC (1.0f)
-#define SLIP_KF_Q_VEL (CHASSIS_KF_Q_VEL/1000)
-#define SLIP_KF_Q_ACC (CHASSIS_KF_Q_ACC/1000)
-#define SLIP_KF_R_VEL (CHASSIS_KF_R_VEL*10000)
-#define SLIP_KF_R_ACC (CHASSIS_KF_R_ACC*1000)
+#define SLIP_KF_CONFIDENCE_ENTER (0.8f)
+#define SLIP_KF_CONFIDENCE_EXIT (0.2f)
+// KF 每拍 Q/R 对角协方差，切换参数时保留滤波历史。
+#define CHASSIS_KF_Q_VEL (1.0f)
+#define CHASSIS_KF_Q_ACC (10.0f)
+#define CHASSIS_KF_R_VEL (0.1f)
+#define CHASSIS_KF_R_ACC (0.1f)
+#define SLIP_KF_Q_VEL (1.0f / 1000.0f)
+#define SLIP_KF_Q_ACC (10.0f / 1000.0f)
+#define SLIP_KF_R_VEL (0.1f * 100000.0f)
+#define SLIP_KF_R_ACC (1.0f)
 
 namespace chassis_config {
 // 传感器到机体，绕 Z 轴旋转 180°。

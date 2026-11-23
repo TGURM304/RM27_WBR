@@ -117,8 +117,23 @@ void chassis_coor::chassis_observer()
     next.lqr_state.x -= leg_motion_distance_;
     chassis_.update_data(next);
     body_omega_clc();
+    slip_norm();
+    if (fsm_.slip_.confidence >= SLIP_KF_CONFIDENCE_ENTER) kalman_slipping_ = true;
+    else if (fsm_.slip_.confidence <= SLIP_KF_CONFIDENCE_EXIT) kalman_slipping_ = false;
+    const float q_vv = kalman_slipping_ ? SLIP_KF_Q_VEL : CHASSIS_KF_Q_VEL;
+    const float q_aa = kalman_slipping_ ? SLIP_KF_Q_ACC : CHASSIS_KF_Q_ACC;
+    const float r_vv = kalman_slipping_ ? SLIP_KF_R_VEL : CHASSIS_KF_R_VEL;
+    const float r_aa = kalman_slipping_ ? SLIP_KF_R_ACC : CHASSIS_KF_R_ACC;
     kalman_vel_observer_.kalman_clc(b.body.body_x_acc,
-        fsm_.slip_.left_hip_vel, fsm_.slip_.right_hip_vel, 1.0f, 10.0f, 0.1f, 0.1f);
+        fsm_.slip_.left_hip_vel, fsm_.slip_.right_hip_vel, q_vv, q_aa, r_vv, r_aa);
+    if (kalman_slipping_ && (fsm_.ctrl == E_STAND || fsm_.ctrl == E_NORMAL)) {
+        const auto body_to_level = math::matrix<3, 3>::rot_euler(b.body.body_roll, b.body.body_theta, 0.0f);
+        const float relative_vel = 0.5f * (wheel_relative_velocity(left, b.body, body_to_level)
+                                       + wheel_relative_velocity(right, b.body, body_to_level));
+        // KF 估计髋部速度，加回轮轴相对髋部的运动，得到轮轴对地速度。
+        next.lqr_state.dot_x = kalman_vel_observer_.get_kalman_data().kalman_vel + relative_vel;
+        chassis_.update_data(next);
+    }
 }
 
 void chassis_coor::body_omega_clc()
@@ -150,6 +165,19 @@ void chassis_coor::body_omega_clc()
     slip.ins_yaw_gry = b.body.body_gyro_yaw;
     // 正反转分别标定，零速补偿为零。
     slip.hip_gry += (slip.ins_yaw_gry >= 0.0f ? 0.04f : 0.02f) * slip.ins_yaw_gry;
+}
+
+void chassis_coor::slip_norm()
+{
+    auto& slip = fsm_.slip_;
+    if (fabsf(slip.hip_gry - slip.ins_yaw_gry) > SLIP_YAW_ERROR_THRESHOLD) {
+        slip.confidence = std::min(1.0f, slip.confidence + SLIP_NORM_RISE_STEP);
+        slip_quiet_ticks_ = 0;
+    } else if (slip_quiet_ticks_ < SLIP_NORM_HOLD_TICKS) {
+        ++slip_quiet_ticks_;
+    } else {
+        slip.confidence = std::max(0.0f, slip.confidence - SLIP_NORM_FALL_STEP);
+    }
 }
 
 void chassis_coor::chassis_command()
@@ -378,6 +406,6 @@ void chassis_coor::chassis_actuator()
         const float temp = base_.get_data().body.body_x_acc;
         const auto kalman = kalman_vel_observer_.get_kalman_data();
         bsp_uart_printf(E_UART_1,"%f,%f,%f,%f,%f\r\n",
-            fsm_.slip_.hip_gry, fsm_.slip_.ins_yaw_gry, chassis_.get_data().lqr_state.dot_x, kalman.kalman_vel, kalman.kalman_acc);
+            fsm_.slip_.hip_gry, fsm_.slip_.ins_yaw_gry, chassis_.get_data().lqr_state.dot_x, kalman.kalman_vel, fsm_.slip_.confidence);
     }
 }
